@@ -1,0 +1,33 @@
+[package]
+name = "wolf3d-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Wolfenstein 3D ported to Rust"
+authors = []
+
+[[bin]]
+name = "wolf3d"
+path = "src/main.rs"
+
+[dependencies]
+# Windowing & framebuffer
+winit = "0.30"
+pixels = "0.15"
+
+# Audio
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
+
+# Binary data parsing
+byteorder = "1.5"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true

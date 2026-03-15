@@ -1,0 +1,184 @@
+/// Raycasting renderer — direct port of WL_DRAW.C.
+///
+/// # Architecture
+///
+/// Wolf3D uses a classic DDA-based raycaster:
+///   1. For each screen column, cast a ray from the player position in the
+///      direction determined by the player angle + column offset.
+///   2. Step along the ray in the tile grid until hitting a wall (DDA).
+///   3. Compute the projected wall height from the perpendicular distance.
+///   4. Draw the wall column, floor, and ceiling.
+///   5. After all walls are drawn, sort and draw sprites.
+///
+/// All distances use 16.16 fixed-point arithmetic.
+use crate::assets::maps::Level;
+use crate::math::{
+    tables::{TrigTables, FINEANGLES},
+    Fixed,
+};
+
+pub const VIEW_WIDTH: usize = 256;
+pub const VIEW_HEIGHT: usize = 152; // status bar takes the bottom ~48 rows
+pub const HALF_HEIGHT: usize = VIEW_HEIGHT / 2;
+
+/// Player view parameters passed to each frame.
+pub struct View {
+    /// Player position in tile-space (fixed-point).
+    pub x: Fixed,
+    pub y: Fixed,
+    /// Player angle in fine-angle units (0..FINEANGLES).
+    pub angle: usize,
+}
+
+/// One entry per screen column produced by the raycaster.
+#[derive(Default)]
+struct ColumnHit {
+    /// Perpendicular distance to the wall.
+    dist: Fixed,
+    /// Which wall texture to use.
+    texture: u16,
+    /// Horizontal texture coordinate (0..63).
+    tex_x: u8,
+    /// True if the hit was on an E/W wall face; false for N/S.
+    ew_face: bool,
+}
+
+pub struct Renderer {
+    trig: TrigTables,
+    /// Pixel column hit data from the last raycaster pass.
+    columns: Vec<ColumnHit>,
+    /// Depth buffer (perpendicular distances) used for sprite clipping.
+    pub depth_buf: Vec<Fixed>,
+}
+
+impl Renderer {
+    pub fn new() -> Self {
+        let trig = TrigTables::build();
+        let columns = (0..VIEW_WIDTH).map(|_| ColumnHit::default()).collect();
+        let depth_buf = vec![Fixed::ZERO; VIEW_WIDTH];
+        Self { trig, columns, depth_buf }
+    }
+
+    /// Draw a full frame into `fb`.
+    ///
+    /// `fb` is a flat RGBA8888 buffer of `stride * height` pixels.
+    /// Only the VIEW_WIDTH × VIEW_HEIGHT region is written.
+    pub fn draw_frame(
+        &mut self,
+        fb: &mut [u8],
+        stride: usize,
+        view: &View,
+        level: &Level,
+        textures: &[Vec<u8>], // 64×64 RGBA textures indexed by tile number
+    ) {
+        self.draw_ceiling_floor(fb, stride);
+        self.cast_walls(view, level);
+        self.draw_walls(fb, stride, textures);
+    }
+
+    /// Fill ceiling (upper half) and floor (lower half) with flat colour.
+    /// TODO: textured floors & ceilings from the Spear of Destiny data.
+    fn draw_ceiling_floor(&self, fb: &mut [u8], stride: usize) {
+        for y in 0..VIEW_HEIGHT {
+            let color = if y < HALF_HEIGHT {
+                [0x39, 0x39, 0x39, 0xFF] // ceiling grey
+            } else {
+                [0x70, 0x70, 0x70, 0xFF] // floor grey
+            };
+            for x in 0..VIEW_WIDTH {
+                let offset = (y * stride + x) * 4;
+                if offset + 3 < fb.len() {
+                    fb[offset..offset + 4].copy_from_slice(&color);
+                }
+            }
+        }
+    }
+
+    /// DDA raycaster — fills self.columns.
+    fn cast_walls(&mut self, view: &View, level: &Level) {
+        // FOV is 60° = FINEANGLES/6 fine-angle units.
+        let fov_half = FINEANGLES / 12;
+        let start_angle =
+            (view.angle + FINEANGLES - fov_half) % FINEANGLES;
+
+        for col in 0..VIEW_WIDTH {
+            let ray_angle =
+                (start_angle + col * FINEANGLES / VIEW_WIDTH) % FINEANGLES;
+
+            // DDA step
+            let cos = self.trig.cos(ray_angle);
+            let sin = self.trig.sin(ray_angle);
+
+            // Starting tile
+            let mut map_x = view.x.to_int();
+            let mut map_y = view.y.to_int();
+
+            // Determine step direction and initial side distances.
+            // (Full DDA implementation to be completed here.)
+            // Placeholder: record a "no wall" hit.
+            self.columns[col] = ColumnHit {
+                dist: Fixed::from_int(64), // far away
+                texture: 0,
+                tex_x: 0,
+                ew_face: false,
+            };
+            self.depth_buf[col] = Fixed::from_int(64);
+
+            // Suppress unused warnings during scaffolding
+            let _ = (cos, sin, map_x, map_y);
+        }
+    }
+
+    /// Project wall columns onto the framebuffer using self.columns.
+    fn draw_walls(&self, fb: &mut [u8], stride: usize, textures: &[Vec<u8>]) {
+        for col in 0..VIEW_WIDTH {
+            let hit = &self.columns[col];
+            if hit.dist == Fixed::ZERO {
+                continue;
+            }
+
+            // Wall height = VIEW_HEIGHT * (TILEGLOBAL / dist)
+            let h_fixed = Fixed::from_int(VIEW_HEIGHT as i32) * Fixed::ONE / hit.dist;
+            let wall_h = h_fixed.to_int().clamp(0, VIEW_HEIGHT as i32) as usize;
+            let top = (VIEW_HEIGHT / 2).saturating_sub(wall_h / 2);
+            let bottom = top + wall_h;
+
+            let tex = textures.get(hit.texture as usize);
+
+            for y in top..bottom.min(VIEW_HEIGHT) {
+                // Map y into texture coordinate (0..63)
+                let tex_y = if wall_h > 0 {
+                    ((y - top) * 64 / wall_h) as u8
+                } else {
+                    0
+                };
+
+                let (r, g, b) = if let Some(t) = tex {
+                    let idx = (tex_y as usize * 64 + hit.tex_x as usize) * 4;
+                    if idx + 2 < t.len() {
+                        (t[idx], t[idx + 1], t[idx + 2])
+                    } else {
+                        (0xFF, 0x00, 0xFF) // magenta = missing texture
+                    }
+                } else {
+                    // Shade based on E/W vs N/S face (like original)
+                    if hit.ew_face { (0xAA, 0x00, 0x00) } else { (0xFF, 0x00, 0x00) }
+                };
+
+                let offset = (y * stride + col) * 4;
+                if offset + 3 < fb.len() {
+                    fb[offset] = r;
+                    fb[offset + 1] = g;
+                    fb[offset + 2] = b;
+                    fb[offset + 3] = 0xFF;
+                }
+            }
+        }
+    }
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
