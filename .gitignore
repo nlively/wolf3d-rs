@@ -1,4 +1,5 @@
 /target
+/output
 Cargo.lock
 
 # Game data files (not redistributable)
@@ -24,3 +25,4 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
