@@ -36,7 +36,7 @@
 ### Milestone 1 — Data pipeline ✦ (start here)
 **Goal:** Load and inspect original game data without rendering anything.
 
-- [ ] **1a. Asset extraction tool** (`src/bin/extract.rs`)
+- [x] **1a. Asset extraction tool** (`src/bin/extract.rs`)
   - Read `VGAHEAD.WL6` (chunk offsets) and `VGADICT.WL6` (Huffman tree)
   - Huffman-decode all chunks from `VGAGRAPH.WL6`
   - Dump PIC chunks as PNG for visual verification
