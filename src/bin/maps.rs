@@ -50,6 +50,7 @@ fn read_map_header(path: &str) -> MapFile {
 // instruct the compiler to keep field order the same so that our parsing
 // matches what it would be in C
 #[repr(C)]
+#[derive(Debug)]
 struct Map
 {
 	planestart: [i32; 3],
@@ -63,6 +64,10 @@ fn parse_and_decompress_game_maps(cursor: &mut Cursor<Vec<u8>>, header_info: &Ma
     let mut maps = Vec::<Map>::new();
 
     // parse out maps in their compressed state
+    // as i understand it, the planes are structured as follows:
+    // plane 0 is wall/architecture tile data,
+    // plane 1 is object/sprite placement data
+    // plane 2 is ignored by wolf3d, and won't be accessed by the loop below
     for i in 0..NUMMAPS {
         let pos = header_info.headeroffsets[i];
         cursor.set_position(pos as u64);
@@ -95,37 +100,39 @@ fn parse_and_decompress_game_maps(cursor: &mut Cursor<Vec<u8>>, header_info: &Ma
             .trim_end_matches('\0')
             .to_string();
 
-        maps.push(Map { planestart, planelength, width, height, name });
+        let map = Map { planestart, planelength, width, height, name };
+        println!("{:#?}", map);
+        maps.push(map);
     }
 
-    for map in maps.iter() {
-        for plane in 0..MAPPLANES {
-            let pos = map.planestart[plane] as u64;
-            let compressed_len = map.planelength[plane] as usize;
+    // for map in maps.iter() {
+    //     for plane in 0..MAPPLANES {
+    //         let pos = map.planestart[plane] as u64;
+    //         let compressed_len = map.planelength[plane] as usize;
 
-            // read compressed data into buffer
-            cursor.set_position(pos);
-            let mut compressed_bytes = vec![0u8; compressed_len];
-            cursor.read_exact(&mut compressed_bytes).expect("failed to read compressed data");
+    //         // read compressed data into buffer
+    //         cursor.set_position(pos);
+    //         let mut compressed_bytes = vec![0u8; compressed_len];
+    //         cursor.read_exact(&mut compressed_bytes).expect("failed to read compressed data");
 
-            // TODO: carmack-decompress the data
-            // TODO: after carmack-decompressing, RLEW-decompress the data
-        }
-    }
+    //         // TODO: carmack-decompress the data
+    //         // TODO: after carmack-decompressing, RLEW-decompress the data
+    //     }
+    // }
     // iterate through compressed maps and decompress
 
     maps
 }
 
-fn cache_map(mapnum: usize, maps_raw: &Vec<Map>, mapsegs: &mut usize) {
-    for plane in 0..MAPPLANES {
-        let pos = maps_raw[mapnum].planestart[plane];
-        let compressed_len = maps_raw[mapnum].planelength[plane];
+// fn cache_map(mapnum: usize, maps_raw: &Vec<Map>, mapsegs: &mut usize) {
+//     for plane in 0..MAPPLANES {
+//         let pos = maps_raw[mapnum].planestart[plane];
+//         let compressed_len = maps_raw[mapnum].planelength[plane];
 
-        // read from pos to compressed_len in map file
+//         // read from pos to compressed_len in map file
 
-    }
-}
+//     }
+// }
 
 fn main() {
     // MAPHEAD is offsets and tile info for map file
@@ -135,9 +142,9 @@ fn main() {
     let mut game_maps_cursor = Cursor::new(game_maps_raw);
 
     // GAMEMAPS is the data file for maps
-    let maps_raw = parse_and_decompress_game_maps(&mut game_maps_cursor, &header_info);
+    let _maps_raw = parse_and_decompress_game_maps(&mut game_maps_cursor, &header_info);
 
-    let mut mapsegs: usize;
+    // let mut mapsegs: usize;
     // loop through planes
    
 }
