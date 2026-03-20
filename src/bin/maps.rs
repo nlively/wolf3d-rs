@@ -60,6 +60,53 @@ struct Map
     name: String,
 } 
 
+const NEAR_TAG: u8 = 0xA7;
+const FAR_TAG: u8 = 0xA8;
+
+// fn read_16_le(data: &[u8], pos: &mut: usize) -> u16 {
+
+// }
+
+fn carmack_decompress(compressed: &[u8], length: u16) -> Vec<u16> {
+    // length was passed in bytes but we're iterating over 2-byte words
+    let mut length = length / 2; 
+
+    let mut inptr = 0;
+    let mut ret = Vec::<u16>::new();
+    
+    while length > 0 {
+        let mut ch = compressed[inptr];
+        inptr += 1;
+
+        // grab the high byte
+        let ch_high = ch >> 8;
+        // grab the low byte
+        let ch_low = ch & 0xFF;
+
+        if ch_high == NEAR_TAG {
+            // handle the escape sequence (0x00A7)
+            if ch_low == 0 {                
+                // treat the tag as literal data, not a command marker
+
+                // read one extra byte from the input stream and place it into
+                // the low byte of `ch`
+                ch = ch | (compressed[inptr+1] & 0xFF);
+
+                // append the word to the output data
+                ret.push(ch);
+                length -= 1;
+            } else {
+                // treat low byte as a repetition count
+                // TODO: i'll get to this
+            }
+        } else if ch_high == FAR_TAG {
+            // TODO: i'll get to this
+        }
+    }
+
+    ret
+}
+
 fn parse_and_decompress_game_maps(cursor: &mut Cursor<Vec<u8>>, header_info: &MapFile) -> Vec<Map> {
     let mut maps = Vec::<Map>::new();
 
@@ -105,21 +152,23 @@ fn parse_and_decompress_game_maps(cursor: &mut Cursor<Vec<u8>>, header_info: &Ma
         maps.push(map);
     }
 
-    // for map in maps.iter() {
-    //     for plane in 0..MAPPLANES {
-    //         let pos = map.planestart[plane] as u64;
-    //         let compressed_len = map.planelength[plane] as usize;
+    for map in maps.iter() {
+        for plane in 0..MAPPLANES {
+            let pos = map.planestart[plane] as u64;
+            let compressed_len = map.planelength[plane] as usize;
 
-    //         // read compressed data into buffer
-    //         cursor.set_position(pos);
-    //         let mut compressed_bytes = vec![0u8; compressed_len];
-    //         cursor.read_exact(&mut compressed_bytes).expect("failed to read compressed data");
+            // in the C app, teh compressed bytes were read into `mapsegs[plane]`, where `mapsegs` is an unsigned pointer
 
-    //         // TODO: carmack-decompress the data
-    //         // TODO: after carmack-decompressing, RLEW-decompress the data
-    //     }
-    // }
-    // iterate through compressed maps and decompress
+            // read compressed data into buffer
+            cursor.set_position(pos);
+            let mut compressed_bytes = vec![0u8; compressed_len];
+            cursor.read_exact(&mut compressed_bytes).expect("failed to read compressed data");
+
+            // TODO: carmack-decompress the data
+
+            // TODO: after carmack-decompressing, RLEW-decompress the data
+        }
+    }
 
     maps
 }
