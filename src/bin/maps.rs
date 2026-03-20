@@ -75,32 +75,72 @@ fn carmack_decompress(compressed: &[u8], length: u16) -> Vec<u16> {
     let mut ret = Vec::<u16>::new();
     
     while length > 0 {
-        let mut ch = compressed[inptr];
+        // grab the low byte
+        let ch_low = compressed[inptr];
+        inptr += 1;
+        // grab the high byte
+        let ch_high = compressed[inptr];
         inptr += 1;
 
-        // grab the high byte
-        let ch_high = ch >> 8;
-        // grab the low byte
-        let ch_low = ch & 0xFF;
-
         if ch_high == NEAR_TAG {
-            // handle the escape sequence (0x00A7)
+            let next_byte = compressed[inptr];
+            inptr += 1;
+
+            // handle the escape sequence (0xA700)
             if ch_low == 0 {                
                 // treat the tag as literal data, not a command marker
-
-                // read one extra byte from the input stream and place it into
-                // the low byte of `ch`
-                ch = ch | (compressed[inptr+1] & 0xFF);
+                // place our extra byte into the low byte of `ch`
+                let ch: u16 = ((ch_high as u16) << 8) | (next_byte as u16);
 
                 // append the word to the output data
                 ret.push(ch);
                 length -= 1;
             } else {
                 // treat low byte as a repetition count
-                // TODO: i'll get to this
+                let mut count = ch_low;
+                let offset = next_byte as usize;
+                let mut copyptr = ret.len() - offset;
+                length -= count as u16;
+                while count > 0 {
+                    let ch = ret[copyptr];
+                    ret.push(ch);
+                    copyptr += 1;
+                    count -= 1;
+                }
             }
         } else if ch_high == FAR_TAG {
-            // TODO: i'll get to this
+            // read one extra byte from the input stream
+            let next_byte = compressed[inptr];
+            inptr += 1;
+
+             // handle the escape sequence (0xA800)
+            if ch_low == 0 {   
+                // treat the tag as literal data, not a command marker
+                // place our extra byte into the low byte of `ch`
+                let ch: u16 = ((ch_high as u16) << 8) | (next_byte as u16);
+
+                // append the word to the output data
+                ret.push(ch);
+                length -= 1;    
+            } else {
+                let next_high = compressed[inptr];
+                inptr += 1;
+
+                // treat low byte as a repetition count
+                let mut count = ch_low;
+                let offset = ((next_high as u16) << 8) | (next_byte as u16);
+                let mut copyptr = offset as usize;
+                length -= count as u16;
+                while count > 0 {
+                    let ch = ret[copyptr];
+                    ret.push(ch);
+                    copyptr += 1;
+                    count -= 1;
+                }
+            }
+        } else {
+            ret.push(((ch_high as u16) << 8) | (ch_low as u16));
+            length -= 1;
         }
     }
 
