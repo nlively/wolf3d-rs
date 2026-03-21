@@ -1,8 +1,6 @@
 use std::fs;
-use std::io;
 use std::io::Cursor;
 use std::io::Read;
-use std::io::Seek;
 
 const NUMMAPS: usize = 60;
 const MAPPLANES: usize = 2;
@@ -147,6 +145,33 @@ fn carmack_decompress(compressed: &[u8], length: u16) -> Vec<u16> {
     ret
 }
 
+fn rlew_decompress(compressed: Vec<u16>, rlew_tag: u16) -> Vec<u16> {
+    let mut decompressed = Vec::<u16>::new();
+
+    let mut i = 0;
+    while i < compressed.len() {
+        let word = compressed[i];
+        i += 1;
+
+        if word == rlew_tag {
+            // grab next 2 words
+            let count = compressed[i];
+            i += 1;
+
+            let char = compressed[i];
+            i += 1;
+
+            for _ in 0..count {
+                decompressed.push(char);
+            }
+        } else {
+            decompressed.push(word);
+        }
+    }
+
+    decompressed
+}
+
 fn parse_and_decompress_game_maps(cursor: &mut Cursor<Vec<u8>>, header_info: &MapFile) -> Vec<Map> {
     let mut maps = Vec::<Map>::new();
 
@@ -204,24 +229,37 @@ fn parse_and_decompress_game_maps(cursor: &mut Cursor<Vec<u8>>, header_info: &Ma
             let mut compressed_bytes = vec![0u8; compressed_len];
             cursor.read_exact(&mut compressed_bytes).expect("failed to read compressed data");
 
-            // TODO: carmack-decompress the data
+            // carmack-decompress the data
+            // decompressed_len is the value of the first 16-bit word in compressed_bytes
+            let decompressed_len = u16::from_le_bytes([compressed_bytes[0], compressed_bytes[1]]);
+            let carmack_decompressed = carmack_decompress(&compressed_bytes[2..], decompressed_len);
 
-            // TODO: after carmack-decompressing, RLEW-decompress the data
+            // RLEW-decompress the data
+            let decompressed = rlew_decompress(carmack_decompressed, header_info.rlewtag);
+
+            // Write out the first map, plane 0, to the screen
+            if plane == 0 && map.name == maps[0].name {
+                println!("Map: {}", map.name);
+                for row in 0..map.height as usize {
+                    for column in 0..map.width as usize {
+                        let tile = decompressed[row * map.width as usize + column];
+                        let ch = match tile {
+                            0 => '.',
+                            1..=63 => '#',
+                            90..=101 => 'D',
+                            106..=107 => 'W',
+                            _ => ' ',
+                        };
+                        print!("{}", ch);
+                    }
+                    println!();
+                }
+            }
         }
     }
 
     maps
 }
-
-// fn cache_map(mapnum: usize, maps_raw: &Vec<Map>, mapsegs: &mut usize) {
-//     for plane in 0..MAPPLANES {
-//         let pos = maps_raw[mapnum].planestart[plane];
-//         let compressed_len = maps_raw[mapnum].planelength[plane];
-
-//         // read from pos to compressed_len in map file
-
-//     }
-// }
 
 fn main() {
     // MAPHEAD is offsets and tile info for map file
