@@ -8,6 +8,9 @@
 
 use std::fs;
 use std::io::{Cursor, Read};
+use anyhow::Error;
+use byteorder::LE;
+use byteorder::ReadBytesExt;
 
 const NUMSOUNDS: usize = 87;
 const NUMSNDCHUNKS: usize = 288;
@@ -20,7 +23,7 @@ const STARTMUSIC: usize = 261;
 struct PCSound {
     length: u32, // number of timer bytes
     priority: u16,
-    data: [u8], // one byte per tick: timer divisor for PC speaker port 0x42. 0x00 = silence
+    data: Vec<u8>, // one byte per tick: timer divisor for PC speaker port 0x42. 0x00 = silence
 }
 
 struct AdLibSound {
@@ -48,14 +51,6 @@ struct Instrument {
     unused: [u8; 3],
 }
 
-struct DigitizedSFX {
-    length: u32,
-    priority: u16,
-    hertz: u16,
-    bits: u8,
-    reference: u8, // unsigned center
-    data: [u8], // raw pcm
-}
 
 // imf format - no header struct, just a sequence of the following:
 struct MusicIMF {
@@ -180,6 +175,111 @@ enum SoundName {
 		LASTSOUND
 }
 
+struct DigitizedSFX {
+    length: u32,
+    priority: u16,
+    // hertz: u16,
+    // bits: u8,
+    // reference: u8, // unsigned center
+    data: Vec<u8>, // raw pcm
+}
+
+fn extract_digitized_sfx(chunk: &Vec<u8>) -> Result<DigitizedSFX, Error> {
+
+    let mut cursor = Cursor::new(chunk);
+
+    // extract length (4 bytes)
+    // let length = cursor.read_u32::<LE>()?;
+    // println!("extracting length {}", length);
+
+    // extract priority (2 bytes)
+    // let priority = cursor.read_u16::<LE>()?;
+    // println!("extracting priority {}", priority);
+
+    // hertz priority (2 bytes)
+    // let hertz = cursor.read_u16::<LE>()?;
+
+    // extract bits (1 byte)
+    // let bits = cursor.read_u8()?;
+
+    // extract reference (1 byte)
+    // let reference = cursor.read_u8()?;
+
+    // extract data (`length` bytes?)
+    // let mut data = vec![0u8; length as usize];
+    // cursor.read_exact(&mut data)?;
+
+    println!("extracting digitized sfx chunk of {} bytes", chunk.len());
+
+    let output = DigitizedSFX { 
+        length: chunk.len() as u32, 
+        priority: 0, 
+        // hertz, 
+        // bits, 
+        // reference, 
+        data: chunk.to_vec(),
+    };
+
+    Ok(output)
+}
+
+fn digitized_to_wav(digitized: DigitizedSFX) -> Vec<u8> {
+    /*
+    A WAV file is just a RIFF container with two chunks prepended before the raw PCM. You write it by hand — 
+    no crate needed:                                                                                       
+
+    1. RIFF header (12 bytes)                                                                                
+    "RIFF"                        // 4 bytes
+    <total file size - 8> as u32 LE  // 4 bytes  (= 28 + length)                                             
+    "WAVE"                        // 4 bytes                                                                 
+                                                                                                            
+    2. fmt  chunk (24 bytes)                                                                                 
+    "fmt "          // 4 bytes                                                                               
+    16 as u32 LE    // 4 bytes  (chunk size, always 16 for PCM)
+    1 as u16 LE     // 2 bytes  (audio format: 1 = PCM)                                                      
+    1 as u16 LE     // 2 bytes  (num channels: mono)                                                         
+    hertz as u32 LE // 4 bytes  (sample rate)                                                                
+    hertz as u32 LE // 4 bytes  (byte rate = sample_rate * channels * bits/8, which for 8-bit mono = hertz)  
+    1 as u16 LE     // 2 bytes  (block align = channels * bits/8)                                            
+    bits as u16 LE  // 2 bytes  (bits per sample)                                                            
+                                                
+    3. data chunk                                                                                            
+    "data"            // 4 bytes                                                                             
+    length as u32 LE  // 4 bytes
+    <data bytes>      // length bytes, copied verbatim from DigitizedSFX.data                                
+     */
+
+    // RIFF header
+    let mut output = Vec::<u8>::new();
+    output.extend_from_slice("RIFF".as_bytes());
+    let header_len: u32 = digitized.length + 28;
+    output.extend(header_len.to_le_bytes());
+    output.extend_from_slice("WAVE".as_bytes());
+
+    let hertz = 7000;
+    let bits: u32 = 8;
+    let channels: u16 = 1; // mono
+    let byte_rate = hertz * (channels as u32) * (bits / 8);
+    let block_align = channels * (bits as u16 / 8);
+
+    // FMT chunk
+    output.extend_from_slice("fmt ".as_bytes());
+    output.extend((16 as u32).to_le_bytes()); // (chunk size, always 16 for PCM)
+    output.extend((1 as u16).to_le_bytes());  // audio format: 1 = PCM
+    output.extend(channels.to_le_bytes());  // num channels: mono
+    output.extend(hertz.to_le_bytes()); // sample rate
+    output.extend((byte_rate).to_le_bytes()); // byte rate = sample_rate * channels * bits/8, which for 8-bit mono = hertz
+    output.extend(block_align.to_le_bytes());  // block align = channels * bits/8
+    output.extend((bits as u16).to_le_bytes()); // bits per sample
+    
+    // data chunk
+    output.extend_from_slice("data".as_bytes());
+    output.extend((digitized.length as u32).to_le_bytes()); 
+    output.extend(digitized.data);
+
+    output
+}
+
 fn main () {
     let header_path = "assets/data/AUDIOHED.WL6"; // chunk offsets
     let audio_path = "assets/data/AUDIOT.WL6"; // raw chunks
@@ -213,4 +313,22 @@ fn main () {
 
         audio_chunks.push(chunk);
     }
+
+    for (i, chunk) in audio_chunks[STARTPCSOUNDS..STARTADLIBSOUNDS].iter().enumerate() {
+        if let AudioChunk::PCSound(data) = chunk {
+            let extracted = extract_pc_sound(data);
+            println!("length = {}", extracted.length);
+            println!("data.len() = {}", extracted.data.len());
+        }
+    }  
+
+}
+
+fn extract_pc_sound(chunk: &Vec<u8>) -> PCSound {
+    let mut cursor = Cursor::new(chunk);
+    let length = cursor.read_u32::<LE>().unwrap();
+    let priority = cursor.read_u16::<LE>().unwrap();
+    let mut data = vec![0u8; length as usize];
+    cursor.read_exact(&mut data).unwrap();
+    PCSound { length, priority, data }
 }
