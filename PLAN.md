@@ -42,7 +42,7 @@
   - Dump PIC chunks as PNG for visual verification
   - Reference: `ID_CA.C::CAL_HuffExpand`, `CA_CacheGrChunk`
 
-- [ ] **1b. Map loader** (`src/assets/maps.rs`)
+- [x] **1b. Map loader** (`src/assets/maps.rs`)
   - Read `MAPHEAD.WL6` (RLEW tag + 100 level offsets)
   - Read `GAMEMAPS.WL6`, Carmack-decompress each plane
   - RLEW-decompress to a flat `u16` tile array
