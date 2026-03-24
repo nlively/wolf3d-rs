@@ -17,7 +17,7 @@ use crate::math::{
     Fixed,
 };
 
-pub const VIEW_WIDTH: usize = 256;
+pub const VIEW_WIDTH: usize = 256; // size of view window
 pub const VIEW_HEIGHT: usize = 152; // status bar takes the bottom ~48 rows
 pub const HALF_HEIGHT: usize = VIEW_HEIGHT / 2;
 
@@ -31,7 +31,7 @@ pub struct View {
 }
 
 /// One entry per screen column produced by the raycaster.
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct ColumnHit {
     /// Perpendicular distance to the wall.
     dist: Fixed,
@@ -98,14 +98,20 @@ impl Renderer {
     fn cast_walls(&mut self, view: &View, level: &Level) {
         // FOV is 60° = FINEANGLES/6 fine-angle units.
         let fov_half = FINEANGLES / 12;
+        // combine the field of view with the player's current angle
         let start_angle =
             (view.angle + FINEANGLES - fov_half) % FINEANGLES;
 
+        // loop through every horizontal pixel from 0 to the end of the view window
         for col in 0..VIEW_WIDTH {
+            // calc the angle of this specific ray
             let ray_angle =
-                (start_angle + col * FINEANGLES / VIEW_WIDTH) % FINEANGLES;
+                (start_angle + col * (FINEANGLES / 6) / VIEW_WIDTH) % FINEANGLES;
 
             // DDA step
+            // noah's note: DDA = digital differential analyzer, which
+            // is a way to translate continuous theoretical values into 
+            // a discrete grid
             let cos = self.trig.cos(ray_angle);
             let sin = self.trig.sin(ray_angle);
 
@@ -113,20 +119,109 @@ impl Renderer {
             let mut map_x = view.x.to_int();
             let mut map_y = view.y.to_int();
 
-            // Determine step direction and initial side distances.
-            // (Full DDA implementation to be completed here.)
-            // Placeholder: record a "no wall" hit.
-            self.columns[col] = ColumnHit {
-                dist: Fixed::from_int(64), // far away
-                texture: 0,
-                tex_x: 0,
-                ew_face: false,
+            // decompose the ray into per-axis delta distances
+            // i.e., how far do we travel along the conceptual ray to cross
+            // one full tile boundary in each axis.
+            // we compute these once and they stay constant for the whole march
+            let delta_dist_x = if cos == Fixed::ZERO {
+                Fixed::from_int(64) // guard against divide by zero
+            } else { 
+                Fixed::abs(Fixed::from_int(1) / cos) 
             };
-            self.depth_buf[col] = Fixed::from_int(64);
+            let delta_dist_y = if sin == Fixed::ZERO {
+                Fixed::from_int(64) // guard against divide by zero
+            } else { 
+                Fixed::abs(Fixed::from_int(1) / sin)
+            };
 
-            // Suppress unused warnings during scaffolding
-            let _ = (cos, sin, map_x, map_y);
+            // determine the direction we step in, both horizontally and vertically
+            let step_x = if cos < Fixed::ZERO { -1 } else { 1 };
+            let step_y = if sin < Fixed::ZERO { -1 } else { 1 };
+
+            let x_frac = Fixed(view.x.frac());
+            let y_frac = Fixed(view.y.frac());
+            let initial_side_dist_x = if step_x < 0 {
+                x_frac * delta_dist_x
+            } else {
+                (Fixed::ONE - x_frac) * delta_dist_x
+            };
+            let initial_side_dist_y = if step_y < 0 {
+                y_frac * delta_dist_y
+            } else {
+                (Fixed::ONE- y_frac) * delta_dist_y
+            };
+
+            // initialize our running `side_dist` values with the initial 
+            // boundary crossing values
+            // from here forward, side_dist_x and y represent distance
+            // along the ray to the next X- or Y-grid crossing
+            let mut side_dist_x = initial_side_dist_x;
+            let mut side_dist_y = initial_side_dist_y;
+
+            const MAX_ITERATIONS: u8 = 100;
+            let mut i:u8 = 0;
+            loop {
+                let ew_face;
+                let perpendicular_distance;
+                if side_dist_x < side_dist_y {
+                    ew_face = true;
+                    perpendicular_distance = side_dist_x;
+                    map_x += step_x;
+                    side_dist_x = side_dist_x + delta_dist_x;
+                } else { 
+                    ew_face = false;
+                    perpendicular_distance = side_dist_y;
+                    map_y += step_y;
+                    side_dist_y = side_dist_y + delta_dist_y;
+                }
+
+                // this is a safeguard against corruption so that our cast to 
+                // usize doesn't end up getting interpreted as a huge number
+                if map_x < 0 || map_y < 0 {
+                    break;
+                }
+
+                let wall = level.wall_at(map_x as usize, map_y as usize);
+                if wall > 0 {
+                    let wall_hit_point = if ew_face {
+                        view.y + perpendicular_distance * sin
+                    } else {
+                        view.x + perpendicular_distance * cos
+                    };
+
+                    self.columns[col] = ColumnHit {
+                        dist: perpendicular_distance,
+                        texture: wall,
+                        tex_x: (wall_hit_point.frac() >> 10) as u8,
+                        ew_face,
+                    };
+
+                    self.depth_buf[col] = perpendicular_distance;
+
+
+                    break;
+                }
+
+                // this is just a safeguard in case we have some kind of corruption
+                // in the map data and _never_ hit a wall, which shouldn't happen
+                if i >= MAX_ITERATIONS {
+                    self.columns[col] = ColumnHit {
+                        dist: Fixed::from_int(64), // far away
+                        texture: 0,
+                        tex_x: 0,
+                        ew_face: false,
+                    };
+                    self.depth_buf[col] = Fixed::from_int(64);
+
+                    break;
+                }
+
+                i += 1;
+            }
         }
+
+        // print columns
+        println!("{:#?}", self.columns);
     }
 
     /// Project wall columns onto the framebuffer using self.columns.

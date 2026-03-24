@@ -49,7 +49,7 @@
   - Print a level's wall plane as ASCII art to verify
   - Reference: `ID_CA.C::CA_CacheMap`, `CA_RLEWexpand`
 
-- [ ] **1c. Sound loader** (`src/assets/sounds.rs`)
+- [x] **1c. Sound loader** (`src/assets/sounds.rs`)
   - Read `AUDIOHED.WL6` (chunk offsets)
   - Read `AUDIOT.WL6` raw chunks
   - Identify and decode PC-speaker and digitized SFX chunks
