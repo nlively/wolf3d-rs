@@ -60,7 +60,7 @@
 ### Milestone 2 — Renderer
 **Goal:** Draw a traversable level using raycasted walls and a flat colour floor/ceiling.
 
-- [ ] **2a. Complete the DDA raycaster** (`src/engine/renderer.rs`)
+- [x] **2a. Complete the DDA raycaster** (`src/engine/renderer.rs`)
   - Implement full DDA wall intersection (replace the placeholder in `cast_walls`)
   - Compute perpendicular distance correctly (avoid fish-eye)
   - Fill `depth_buf` for sprite clipping

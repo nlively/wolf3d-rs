@@ -162,14 +162,31 @@ impl Renderer {
             let mut i:u8 = 0;
             loop {
                 let ew_face;
+                // perpendicular_distance is the key to avoiding the fisheye distortion that
+                // would otherwise make our walls look curved.
+                // perpendicular_distance is the distance from the player to the wall
+                // measured perpendicular to the camera plane (i.e. straight ahead along
+                // the view direction), not along the ray itself.
+                // another way to say that is that perpendicular_distance is the distance
+                // between the player and the wall dead-on, not at an offset angle.
+                // this is because we hit a point on the wall, and multiple rays
+                // may hit multiple points on the same wall, each at a different distance
+                // because each ray comes from a different angle.
                 let perpendicular_distance;
                 if side_dist_x < side_dist_y {
                     ew_face = true;
+
+                    // dead-on distance between player and wall is the distance
+                    // it has traveled so far (before incrementing) to reach the next
+                    // X-grid boundary
                     perpendicular_distance = side_dist_x;
                     map_x += step_x;
                     side_dist_x = side_dist_x + delta_dist_x;
                 } else { 
                     ew_face = false;
+                    // dead-on distance between player and wall is the distance
+                    // it has traveled so far (before incrementing) to reach the next
+                    // Y-grid boundary
                     perpendicular_distance = side_dist_y;
                     map_y += step_y;
                     side_dist_y = side_dist_y + delta_dist_y;
@@ -182,13 +199,18 @@ impl Renderer {
                 }
 
                 let wall = level.wall_at(map_x as usize, map_y as usize);
+                // wall is a positive number if we hit a wall, which we always should.
                 if wall > 0 {
+                    // the ray doesn't just hit a tile; it hits a _point_
+                    // on the tile.
+                    // determine what point on the tile the ray collided with?
                     let wall_hit_point = if ew_face {
                         view.y + perpendicular_distance * sin
                     } else {
                         view.x + perpendicular_distance * cos
                     };
 
+                    // save a ColumnHit instance for this particular pixel
                     self.columns[col] = ColumnHit {
                         dist: perpendicular_distance,
                         texture: wall,
@@ -232,8 +254,8 @@ impl Renderer {
                 continue;
             }
 
-            // Wall height = VIEW_HEIGHT * (TILEGLOBAL / dist)
-            let h_fixed = Fixed::from_int(VIEW_HEIGHT as i32) * Fixed::ONE / hit.dist;
+            // Wall height = VIEW_HEIGHT * /dist
+            let h_fixed = Fixed::from_int(VIEW_HEIGHT as i32) / hit.dist;
             let wall_h = h_fixed.to_int().clamp(0, VIEW_HEIGHT as i32) as usize;
             let top = (VIEW_HEIGHT / 2).saturating_sub(wall_h / 2);
             let bottom = top + wall_h;
