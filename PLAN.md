@@ -49,7 +49,7 @@
   - Print a level's wall plane as ASCII art to verify
   - Reference: `ID_CA.C::CA_CacheMap`, `CA_RLEWexpand`
 
-- [ ] **1c. Sound loader** (`src/assets/sounds.rs`)
+- [x] **1c. Sound loader** (`src/assets/sounds.rs`)
   - Read `AUDIOHED.WL6` (chunk offsets)
   - Read `AUDIOT.WL6` raw chunks
   - Identify and decode PC-speaker and digitized SFX chunks
@@ -60,7 +60,7 @@
 ### Milestone 2 — Renderer
 **Goal:** Draw a traversable level using raycasted walls and a flat colour floor/ceiling.
 
-- [ ] **2a. Complete the DDA raycaster** (`src/engine/renderer.rs`)
+- [x] **2a. Complete the DDA raycaster** (`src/engine/renderer.rs`)
   - Implement full DDA wall intersection (replace the placeholder in `cast_walls`)
   - Compute perpendicular distance correctly (avoid fish-eye)
   - Fill `depth_buf` for sprite clipping
