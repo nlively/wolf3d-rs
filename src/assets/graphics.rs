@@ -62,6 +62,7 @@ impl GraphicsCache {
         let header_path = format!("{}/VGAHEAD.WL6", base_str);
         let huffman_dict_path = format!("{}/VGADICT.WL6", base_str);
         let assets_path = format!("{}/VGAGRAPH.WL6", base_str);
+        let swap_path = format!("{}/VSWAP.WL6", base_str);
 
         // TODO: locate VGAHEAD.WL6, VGADICT.WL6, VGAGRAPH.WL6 in `base`
         // and decode the Huffman-compressed archive.
@@ -75,7 +76,7 @@ impl GraphicsCache {
 
         let data_offsets: Vec<u32>;
         let huffman_tree: Vec<HuffmanNode>;
-        let palette: Vec<(u8, u8, u8)> = load_game_palette("assets/GAMEPAL.OBJ");
+        // let palette: Vec<(u8, u8, u8)> = load_game_palette("assets/GAMEPAL.OBJ");
 
         data_offsets = read_vga_file_offsets(&header_path).expect("failed to read data offsets");
         huffman_tree = read_vga_huffman_tree(&huffman_dict_path).expect("failed to load huffman tree");
@@ -97,26 +98,26 @@ impl GraphicsCache {
         let mut chunks = Vec::<Option<Vec<u8>>>::new();
 
         // now we make meaning from each chunk of decompressed data
-        let pictable = &decompressed[PICTABLE_IDX];
+        // let pictable = &decompressed[PICTABLE_IDX];
 
         for i in PICS_IDX..(PICS_IDX+NUMPICS) {
             // raw bytes of the graphics chunk
             let pic = &decompressed[i];
             // each entry in pictable is 4 bytes so we need to figure out the
             // right index.
-            let entry = (i-3)*4; 
+            // let entry = (i-3)*4; 
             // dimension bytes
-            let width = u16::from_le_bytes([pictable[entry], pictable[entry+1]]);
-            let height = u16::from_le_bytes([pictable[entry+2], pictable[entry+3]]);
+            // let width = u16::from_le_bytes([pictable[entry], pictable[entry+1]]);
+            // let height = u16::from_le_bytes([pictable[entry+2], pictable[entry+3]]);
             
             chunks.push(Some(pic.clone()));
         }
 
-        // TODO: build sprites vector from 
-
+        let page_info = read_page_file(&swap_path).expect("could not parse VSWAP.WL6");
+        let sprites = page_info.sprite_pages;
 
         log::warn!("GraphicsCache::load — stub, no data loaded from {:?}", base);
-        Ok(Self { chunks, sprites: Vec::new() })
+        Ok(Self { chunks, sprites: sprites })
     }
 
     /// Return the raw bytes of chunk `index`, if loaded.
@@ -258,151 +259,60 @@ fn decompress_graphics_chunk(chunk: &[u8], huffman_tree: &[HuffmanNode]) -> Vec<
     out
 }
 
-/*
-reference code from C
-//	File specific variables
-	char			PageFileName[13] = {"VSWAP."};
-	int				PageFile = -1;
-	word			ChunksInFile;
-	word			PMSpriteStart,PMSoundStart;
-
-
-typedef	struct
-		{
-			longword	offset;		// Offset of chunk into file
-			word		length;		// Length of the chunk
-
-			int			xmsPage;	// If in XMS, (xmsPage * PMPageSize) gives offset into XMS handle
-
-			PMLockType	locked;		// If set, this page can't be purged
-			int			emsPage;	// If in EMS, logical page/offset into page
-			int			mainPage;	// If in Main, index into handle array
-
-			longword	lastHit;	// Last frame number of hit
-		} PageListStruct;
-
-//	General usage variables
-	boolean			PMStarted,
-					PMPanicMode,
-					PMThrashing;
-	word			XMSPagesUsed,
-					EMSPagesUsed,
-					MainPagesUsed,
-					PMNumBlocks;
-	long			PMFrameCount;
-	PageListStruct	far *PMPages,
-					_seg *PMSegPages;
-PML_OpenPageFile(void)
-{
-	int				i;
-	long			size;
-	void			_seg *buf;
-	longword		far *offsetptr;
-	word			far *lengthptr;
-	PageListStruct	far *page;
-
-	PageFile = open(PageFileName,O_RDONLY + O_BINARY);
-	if (PageFile == -1)
-		Quit("PML_OpenPageFile: Unable to open page file");
-
-	// Read in header variables
-	read(PageFile,&ChunksInFile,sizeof(ChunksInFile));
-	read(PageFile,&PMSpriteStart,sizeof(PMSpriteStart));
-	read(PageFile,&PMSoundStart,sizeof(PMSoundStart));
-
-	// Allocate and clear the page list
-	PMNumBlocks = ChunksInFile;
-    // allocate a chunk of memory to handle `PMNumBlocks` number of 
-    // PageListStruct instances
-	MM_GetPtr(&(memptr)PMSegPages,sizeof(PageListStruct) * PMNumBlocks);
-    // prevent that memory from being allocated to anything else?
-	MM_SetLock(&(memptr)PMSegPages,true);
-    // PMPages is basically a C array, but beccause this is C
-    // it's a pointer, and the next line essentially casts our
-    // allocated chunk of memory as an array of PageListStructs
-	PMPages = (PageListStruct far *)PMSegPages;
-    // Now we fill that whole allocated chunk of memory with 0s
-	_fmemset(PMPages,0,sizeof(PageListStruct) * PMNumBlocks);
-
-	// Read in the chunk offsets
-
-    // each chunk offset will be a `longword`, which in rust will be
-    // a `u32`
-	size = sizeof(longword) * ChunksInFile;
-    // allocate `size` bytes into a void pointer called `buf``
-	MM_GetPtr(&buf,size);
-    // read `size` bytes from our file into the memory `buf`
-    // points to.
-    // basically `buf` points to an array of offsets, where each
-    // `offset` is 32 bits and has `ChunksInFile` elements
-	if (!CA_FarRead(PageFile,(byte far *)buf,size))
-		Quit("PML_OpenPageFile: Offset read failed");
-    // again, in C-ness, offsetptr will basically be an `array`
-    // of `u32` with `ChunksInFile` elements.
-	offsetptr = (longword far *)buf;
-    // each iteration will add 1 to `i` and will increment
-    // `page` by the number of bytes represented in a `PageListStruct`
-	for (i = 0,page = PMPages;i < ChunksInFile;i++,page++)
-        // assign the offset of each `page` to the current `u32`
-        // in `buf` and then increment `buf` index (`offsetptr`) 
-        // to the next entry in `buf`
-		page->offset = *offsetptr++;
-    // release `buf`
-	MM_FreePtr(&buf);
-
-	// Read in the chunk lengths
-	size = sizeof(word) * ChunksInFile;
-	MM_GetPtr(&buf,size);
-	if (!CA_FarRead(PageFile,(byte far *)buf,size))
-		Quit("PML_OpenPageFile: Length read failed");
-	lengthptr = (word far *)buf;
-	for (i = 0,page = PMPages;i < ChunksInFile;i++,page++)
-		page->length = *lengthptr++;
-	MM_FreePtr(&buf);
-} */
-
 enum PMLockType	{
     PMLUnlocked,    // in the original c, probably 0 at the byte level, but need to verify.
     PMLLocked,      // probably 1
 } 
+
+#[derive(Clone)]
 struct PageListStruct {
-    offset: u32,
-    length: u16,
-    xms_page: i16,
-    locked: PMLockType,
-    ems_page: i16,
-    main_page: i16,
-    last_hit: u32,
+    offset: usize,
+    length: usize,
+    // xms_page: i16,
+    // locked: PMLockType,
+    // ems_page: i16,
+    // main_page: i16,
+    // last_hit: u32,
 }
 
-fn read_page_file(path: &str) {
+struct PageInfo {
+    total_page_count: usize,
+    // note: wall textures start at 0, and then it's sprite textures, then sound.
+    // sprite_start_index: u16,
+    // sound_start_index: u16,
+    // page_list: Vec<PageListStruct>,
+    wall_pages: Vec<Vec<u8>>,
+    sprite_pages: Vec<SpriteInfo>,
+    sound_pages: Vec<Vec<u8>>,
+}
+
+/* NOTES ABOUT VSWAP.WL6 FROM MANUAL ANALYSIS
+
+- 663 (0x297) total pages
+- sprite pages start at 106 (0x6A)
+- sound pages start at 542 (0x21E)
+*/
+
+fn read_page_file(path: &str) -> Option<PageInfo> {
     let bytes = fs::read(path).expect("failed to read page file");
     let mut cursor = Cursor::new(bytes);
 
-    let chunks_in_file: u16 = cursor.read_u16::<LE>().expect("failed to read chunks_in_file");
-    let pm_sprite_start: u16 = cursor.read_u16::<LE>().expect("failed to read pm_sprite_start");
-    let pm_sound_start: u16 = cursor.read_u16::<LE>().expect("failed to read pm_sound_start");
-
-    let pm_num_blocks = chunks_in_file;
+    let total_page_count: usize = cursor.read_u16::<LE>().expect("failed to read chunks_in_file") as usize;
+    let sprite_start_index: usize = cursor.read_u16::<LE>().expect("failed to read pm_sprite_start") as usize;
+    let sound_start_index: usize = cursor.read_u16::<LE>().expect("failed to read pm_sound_start") as usize;
 
     // this will end up with `chunks_in_file` elements
-    let mut offsets = Vec::<u32>::new();
-    let mut pm_pages = Vec::<PageListStruct>::new();
+    let mut page_list = Vec::<PageListStruct>::new();
 
     // the next chunk of memory is a series of 4-byte chunks
     // with `chunks_in_file` elements, where each 4-byte chunk
     // is the offset of a chunk of data that will become a 
     // PageListStruct instance.
-    for _ in 0..chunks_in_file {
+    for _ in 0..total_page_count {
         let offset = cursor.read_u32::<LE>().expect("failed to read offset");
-        pm_pages.push(PageListStruct {
-            offset,
-            length: 0,
-            xms_page: 0,
-            locked: PMLockType::PMLUnlocked,
-            ems_page: 0,
-            main_page: 0,
-            last_hit: 0,
+        page_list.push(PageListStruct {
+            offset: offset as usize,
+            length: 0, // fill this in next loop
         })
     }
 
@@ -412,10 +322,63 @@ fn read_page_file(path: &str) {
     // PageListStruct instance.
     // together with `offset` above, `length` helps us identify the
     // exact location and size of each chunk.
-    for i in 0..(chunks_in_file as usize) {
+    for i in 0..(total_page_count as usize) {
         let length = cursor.read_u16::<LE>().expect("failed to read length");
-        pm_pages[i].length = length;
+        page_list[i].length = length as usize;
     }
 
+    let wall_page_info = page_list[0..sprite_start_index].to_vec();
+    let sprite_page_info = page_list[sprite_start_index..sound_start_index].to_vec();
+    let sound_page_info = page_list[sound_start_index..].to_vec();
 
+    let mut wall_pages = Vec::<Vec<u8>>::new();
+    let mut sprite_pages = Vec::<SpriteInfo>::new();
+    let mut sound_pages = Vec::<Vec<u8>>::new();
+
+    // wall data is raw planar vga data (4096 bytes each, i think)
+    for page in wall_page_info {
+        cursor.set_position(page.offset as u64);
+        let mut bytes = vec![0u8; page.length];
+        cursor.read_exact(&mut bytes).expect("failed to read wall page");
+        wall_pages.push(bytes);
+    }
+
+    for page in sprite_page_info {
+        cursor.set_position(page.offset as u64);
+        let mut bytes = vec![0u8; page.length];
+        cursor.read_exact(&mut bytes).expect("failed to read sprite page");
+
+        let mut sprite_cursor = Cursor::new(bytes);
+        let info = SpriteInfo {
+            width: sprite_cursor.read_i16::<LE>().unwrap(),
+            height: sprite_cursor.read_i16::<LE>().unwrap(),
+            org_x: sprite_cursor.read_i16::<LE>().unwrap(),
+            org_y: sprite_cursor.read_i16::<LE>().unwrap(),
+            xl: sprite_cursor.read_i16::<LE>().unwrap(),
+            yl: sprite_cursor.read_i16::<LE>().unwrap(),
+            xh: sprite_cursor.read_i16::<LE>().unwrap(),
+            yh: sprite_cursor.read_i16::<LE>().unwrap(),
+            shifts: sprite_cursor.read_i16::<LE>().unwrap(),
+        };
+
+        sprite_pages.push(info);
+    }
+
+    // wall data is raw planar vga data (4096 bytes each, i think)
+    for page in sound_page_info {
+        cursor.set_position(page.offset as u64);
+        let mut bytes = vec![0u8; page.length];
+        cursor.read_exact(&mut bytes).expect("failed to read wall page");
+        sound_pages.push(bytes);
+    }
+
+    // now get the actual pages
+
+    Some(PageInfo { 
+        total_page_count, 
+        // sprite_start_index, sound_start_index, page_list,
+        wall_pages,
+        sprite_pages,
+        sound_pages,
+    })
 }
