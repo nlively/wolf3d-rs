@@ -7,9 +7,9 @@ use std::io::Read;
 /// Relevant original constants live in GFXV_WL6.H (chunk enum).
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{Result};
 
-
+use std::ops::Deref;
 use std::fs;
 use std::io::Cursor;
 use std::io::ErrorKind;
@@ -35,6 +35,13 @@ pub struct GfxChunk {
     pub height: u16,
 }
 
+impl Deref for GfxChunk {
+    type Target = GfxChunk;
+    fn deref(&self) -> &GfxChunk {
+        &self
+    }
+}
+
 /// Sprite table entry — spritetabletype in the original.
 #[derive(Debug, Clone)]
 pub struct SpriteInfo {
@@ -49,11 +56,20 @@ pub struct SpriteInfo {
     pub shifts: i16,
 }
 
+struct CompShape {
+    leftpix: u16,
+    rightpix: u16,
+    dataofs: [u16; 64],
+}
+
 pub struct GraphicsCache {
     /// Raw decoded chunks, indexed by chunk number.
-    chunks: Vec<Option<Vec<u8>>>,
-    /// Sprite metadata table (loaded from the sprite info chunk).
+    chunks: Vec<Option<GfxChunk>>,
+    palette: Vec<(u8, u8, u8)>,
+    /// Sprite metadata table (loaded from VSWAP).
     pub sprites: Vec<SpriteInfo>,
+    /// Wall texture metadata table (loaded from VSWAP)
+    pub wall_textures: Vec<Vec<u8>>,
 }
 
 impl GraphicsCache {
@@ -63,73 +79,92 @@ impl GraphicsCache {
         let huffman_dict_path = format!("{}/VGADICT.WL6", base_str);
         let assets_path = format!("{}/VGAGRAPH.WL6", base_str);
         let swap_path = format!("{}/VSWAP.WL6", base_str);
-
-        // TODO: locate VGAHEAD.WL6, VGADICT.WL6, VGAGRAPH.WL6 in `base`
-        // and decode the Huffman-compressed archive.
-        //
-        // Steps:
-        //   1. Read VGAHEAD to get chunk count and offsets.
-        //   2. Read VGADICT for the 256-entry Huffman decode tree.
-        //   3. For each chunk: read compressed bytes, decode with tree.
-        //   4. Parse sprite table from chunk STARTSPRITES (see GFXV_WL6.H).
-
+        let palette_path = "assets/VSWAP.WL6";
 
         let data_offsets: Vec<u32>;
         let huffman_tree: Vec<HuffmanNode>;
-        // let palette: Vec<(u8, u8, u8)> = load_game_palette("assets/GAMEPAL.OBJ");
+        let palette: Vec<(u8, u8, u8)>;        
+        let page_info: PageInfo;
+        let raw_graphics_data: Vec<u8>;
 
+        // Read VGAHEAD to get chunk count and offsets.
         data_offsets = read_vga_file_offsets(&header_path).expect("failed to read data offsets");
+        // Read VGADICT for the 256-entry Huffman decode tree.
         huffman_tree = read_vga_huffman_tree(&huffman_dict_path).expect("failed to load huffman tree");
-
-        let raw_graphics_data: Vec<u8> = fs::read(assets_path).expect("failed to read file {path}"); 
+        palette = load_game_palette(&palette_path);
+        page_info = read_page_file(&swap_path).expect("could not parse VSWAP.WL6");
+        raw_graphics_data = fs::read(assets_path).expect("failed to read file {path}"); 
+        
         let mut decompressed: Vec<Vec<u8>> = Vec::new();
 
-        for (i, pair) in data_offsets.windows(2).enumerate() {
+        for pair in data_offsets.windows(2) {
             let start = pair[0] as usize;
             let end = pair[1] as usize;
             let chunk: &[u8] = &raw_graphics_data[start..end];
-            println!("decompressing chunk {i}, size {}", chunk.len());
             let d = decompress_graphics_chunk(chunk, &huffman_tree);
-            println!("decompressed chunk {i}, size {}", d.len());
 
             decompressed.push(d);
         }
 
-        let mut chunks = Vec::<Option<Vec<u8>>>::new();
+        let mut chunks = Vec::<Option<GfxChunk>>::new();
 
         // now we make meaning from each chunk of decompressed data
-        // let pictable = &decompressed[PICTABLE_IDX];
+        let pictable = &decompressed[PICTABLE_IDX];
 
         for i in PICS_IDX..(PICS_IDX+NUMPICS) {
             // raw bytes of the graphics chunk
             let pic = &decompressed[i];
             // each entry in pictable is 4 bytes so we need to figure out the
             // right index.
-            // let entry = (i-3)*4; 
+            let entry = (i-3)*4; 
             // dimension bytes
-            // let width = u16::from_le_bytes([pictable[entry], pictable[entry+1]]);
-            // let height = u16::from_le_bytes([pictable[entry+2], pictable[entry+3]]);
+            let width = u16::from_le_bytes([pictable[entry], pictable[entry+1]]);
+            let height = u16::from_le_bytes([pictable[entry+2], pictable[entry+3]]);
+
+            let chunk = GfxChunk {
+                index: i,
+                data: pic.clone(),
+                width,
+                height,
+            };
             
-            chunks.push(Some(pic.clone()));
+            chunks.push(Some(chunk));
         }
 
-        let page_info = read_page_file(&swap_path).expect("could not parse VSWAP.WL6");
-        let sprites = page_info.sprite_pages;
 
         log::warn!("GraphicsCache::load — stub, no data loaded from {:?}", base);
-        Ok(Self { chunks, sprites: sprites })
+        Ok(Self { 
+            chunks, 
+            palette, 
+            wall_textures: page_info.wall_pages, 
+            sprites: Vec::new(),
+        })
     }
 
     /// Return the raw bytes of chunk `index`, if loaded.
-    pub fn chunk(&self, index: usize) -> Option<&[u8]> {
+    pub fn chunk(&self, index: usize) -> Option<&GfxChunk> {
         self.chunks.get(index)?.as_deref()
     }
 
     /// Return a 32-bit RGBA pixel slice for a picture chunk.
     /// Width and height come from the picture table.
-    pub fn pic_rgba(&self, _index: usize) -> Option<(&[u8], u16, u16)> {
-        // TODO: convert chunky VGA palette data → RGBA8888
-        None
+    pub fn pic_rgba(&self, index: usize) -> Option<(Vec<u8>, u16, u16)> {
+        let chunk = self.chunk(index);
+        match chunk {
+            Some(v) => {
+                // TODO: convert chunky VGA palette data → RGBA8888
+                let pixels: Vec<u8> = v.data.iter()
+                    .flat_map(|&idx| {
+                        let (r, g, b) = self.palette[idx as usize];
+                        [r, g, b]
+                    })
+                    .collect();
+               
+                Some((pixels, v.width, v.height))
+            },
+            None => None
+             
+        }
     }
 }
 
@@ -268,6 +303,8 @@ enum PMLockType	{
 struct PageListStruct {
     offset: usize,
     length: usize,
+    // these were in the original c struct but i never found where they were
+    // set...
     // xms_page: i16,
     // locked: PMLockType,
     // ems_page: i16,
@@ -282,7 +319,7 @@ struct PageInfo {
     // sound_start_index: u16,
     // page_list: Vec<PageListStruct>,
     wall_pages: Vec<Vec<u8>>,
-    sprite_pages: Vec<SpriteInfo>,
+    sprite_pages: Vec<CompShape>,
     sound_pages: Vec<Vec<u8>>,
 }
 
@@ -332,7 +369,7 @@ fn read_page_file(path: &str) -> Option<PageInfo> {
     let sound_page_info = page_list[sound_start_index..].to_vec();
 
     let mut wall_pages = Vec::<Vec<u8>>::new();
-    let mut sprite_pages = Vec::<SpriteInfo>::new();
+    let mut sprite_pages = Vec::<CompShape>::new();
     let mut sound_pages = Vec::<Vec<u8>>::new();
 
     // wall data is raw planar vga data (4096 bytes each, i think)
@@ -349,17 +386,35 @@ fn read_page_file(path: &str) -> Option<PageInfo> {
         cursor.read_exact(&mut bytes).expect("failed to read sprite page");
 
         let mut sprite_cursor = Cursor::new(bytes);
-        let info = SpriteInfo {
-            width: sprite_cursor.read_i16::<LE>().unwrap(),
-            height: sprite_cursor.read_i16::<LE>().unwrap(),
-            org_x: sprite_cursor.read_i16::<LE>().unwrap(),
-            org_y: sprite_cursor.read_i16::<LE>().unwrap(),
-            xl: sprite_cursor.read_i16::<LE>().unwrap(),
-            yl: sprite_cursor.read_i16::<LE>().unwrap(),
-            xh: sprite_cursor.read_i16::<LE>().unwrap(),
-            yh: sprite_cursor.read_i16::<LE>().unwrap(),
-            shifts: sprite_cursor.read_i16::<LE>().unwrap(),
+
+        let leftpix = sprite_cursor.read_u16::<LE>().unwrap();
+        let rightpix = sprite_cursor.read_u16::<LE>().unwrap();
+        let mut dataofs = [0u16; 64];
+
+        for i in 0..64 {
+            dataofs[i] = sprite_cursor.read_u16::<LE>().unwrap();
+        }
+
+        let info = CompShape { 
+            leftpix, 
+            rightpix, 
+            dataofs,
         };
+
+        // the following is here because i misunderstood the original assignment
+        // and meaning of the sprite pages data in VSWAP.  keeping it here because 
+        // i might need the parsing later, at which time i'll move it out
+        // let info = SpriteInfo {
+        //     width: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     height: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     org_x: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     org_y: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     xl: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     yl: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     xh: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     yh: sprite_cursor.read_i16::<LE>().unwrap(),
+        //     shifts: sprite_cursor.read_i16::<LE>().unwrap(),
+        // };
 
         sprite_pages.push(info);
     }
@@ -371,8 +426,6 @@ fn read_page_file(path: &str) -> Option<PageInfo> {
         cursor.read_exact(&mut bytes).expect("failed to read wall page");
         sound_pages.push(bytes);
     }
-
-    // now get the actual pages
 
     Some(PageInfo { 
         total_page_count, 
