@@ -32,6 +32,7 @@ fn t_stand(actor: &mut Actor, player: &Player) {
     }
     actor.tic_count = 10;
 
+    // if the standing actor detects the player, switch mode to chase
     if sight_player(actor, player) {
         actor.mode = ActorMode::Chase;
     }
@@ -39,6 +40,7 @@ fn t_stand(actor: &mut Actor, player: &Player) {
 
 /// Actor is patrolling along a pre-set path.
 fn t_path(actor: &mut Actor, player: &Player) {
+    // if the patrolling actor detects the player, swithc mode to chase
     if sight_player(actor, player) {
         actor.mode = ActorMode::Chase;
         return;
@@ -49,6 +51,7 @@ fn t_path(actor: &mut Actor, player: &Player) {
 
 /// Actor is chasing the player using simple direct movement.
 fn t_chase(actor: &mut Actor, player: &Player) {
+    // if the chasing actor loses sight of the player, switch mode to patrolling
     if !sight_player(actor, player) {
         // Lost sight — go back to patrolling
         actor.mode = ActorMode::Path;
@@ -83,6 +86,7 @@ fn t_shoot(actor: &mut Actor, player: &Player) {
     if actor.tic_count > 0 {
         return;
     }
+    // shoot, then go back to chasing
     // TODO: fire projectile / hitscan
     actor.mode = ActorMode::Chase;
 }
@@ -92,6 +96,7 @@ fn t_pain(actor: &mut Actor) {
     if actor.tic_count > 0 {
         return;
     }
+    // wince, then chase :) 
     actor.mode = ActorMode::Chase;
 }
 
@@ -100,6 +105,7 @@ fn t_die(actor: &mut Actor) {
     if actor.tic_count > 0 {
         return;
     }
+    // the chase is over. RIP
     actor.mode = ActorMode::Dead;
 }
 
