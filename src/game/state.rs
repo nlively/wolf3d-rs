@@ -9,6 +9,7 @@ use crate::engine::renderer::{Renderer, View};
 use crate::game::{actor::ActorList, door::DoorList, map::GameMap, player::Player};
 use crate::input::handler::InputHandler;
 
+#[derive(Debug)]
 pub enum Screen {
     /// Main game view.
     Playing,
@@ -18,6 +19,150 @@ pub enum Screen {
     Intermission,
     /// Game over.
     GameOver,
+}
+
+pub enum MenuOption {
+    NewGame,
+    Sound,
+    Control,
+    LoadGame,
+    SaveGame,
+    ChangeView,
+    #[cfg(all(not(goodtimes), not(spear)))]
+    ReadThis,
+    ViewScores,
+    BackToDemo,
+    Quit,
+}
+
+const MENU_X: i16 = 76;
+const MENU_Y: i16 = 55;
+const MENU_W: i16 = 178;
+#[cfg(not(spear))]
+const MENU_H: i16 = 13*10+6;
+#[cfg(spear)]
+const MENU_H: i16 = 13*9+6;
+
+const SM_X: i16 = 48;
+const SM_W: i16 = 250;
+
+const SM_Y1: u16 = 20;
+const SM_H1: u16 = 4*13-7;
+const SM_Y2: u16 = SM_Y1+5*13;
+const SM_H2: u16 = 4*13-7;
+const SM_Y3: u16 = SM_Y2+5*13;
+const SM_H3: u16 = 3*13-7;
+
+const CTL_X: u16 = 24;
+const CTL_Y: u16 = 70;
+const CTL_W: u16 = 284;
+const CTL_H: u16 = 13*7-7;
+
+const LSM_X: u16 = 85;
+const LSM_Y: u16 = 55;
+const LSM_W: u16 = 175;
+const LSM_H: u16 = 10*13+10;
+
+const NM_X: u16 = 50;
+const NM_Y: u16 = 100;
+const NM_W: u16 = 225;
+const NM_H: u16 = 13*4+15;
+
+const NE_X: u16 = 10;
+const NE_Y: u16 = 23;
+const NE_W: u16 = 320-NE_X*2;
+const NE_H: u16 = 200-NE_Y*2;
+
+const CST_X: u16 = 20;
+const CST_Y: u16 = 48;
+const CST_START: u16 = 60;
+const CST_SPC: u16 = 60;
+
+#[cfg(any(spear, goodtimes))]
+const STARTITEM:MenuOption = MenuOption::NewGame;
+
+#[cfg(all(not(spear), not(goodtimes)))]
+const STARTITEM:MenuOption = MenuOption::ReadThis;
+
+pub struct MenuItemInfo {
+    x: i16,
+    y: i16,
+    amount: u16,
+    current_position: MenuOption,
+    indent: u16,
+}
+
+impl MenuItemInfo {
+    fn new(x: i16, y: i16, amount: u16, current_position: MenuOption, indent: u16) -> Self {
+        Self {
+            x, 
+            y,
+            amount,
+            current_position,
+            indent,
+        }
+    }
+}
+
+pub struct MenuItem {
+    active: bool,
+    title: String,
+    handler: fn(i32),
+}
+
+impl MenuItem {
+    fn new(active: bool, title: String, handler: fn(i32)) -> Self {
+        Self {
+            active,
+            title,
+            handler,
+        }
+    }
+}
+
+pub struct Menu {
+    items: Vec<MenuItem>,
+    item_info: Vec<MenuItemInfo>,
+}
+
+impl Menu {
+    fn new() -> Self {
+        let items = vec![
+            MenuItem::new(true, String::from("New Game"), Self::new_game),
+        ];
+
+        let item_info = vec![
+            MenuItemInfo::new(MENU_X, MENU_Y, 10, STARTITEM, 24),
+        ];
+
+        Self {
+            items,
+            item_info,
+        }
+    }
+
+    fn new_game(i: i32) {
+
+    }
+}
+
+fn handle_menu(item_i: &MenuItemInfo, items: [MenuItem], handler: fn(i16)) -> u16 {
+    let key: u8;
+    static mut redrawitem: i16 = 1;
+    static mut lastitem: i16 = -1;
+    let i: i16;
+    let x: i16;
+    let basey: i16;
+    let exit: i16;
+    let which: MenuOption;
+    let shape: i16;
+    let timer: i16;
+    // let ci: ControlInfo;
+
+    which = item_i.current_position;
+    x = item_i.x & -8;
+    basey = item_i.y - 2;
+    y = basey + which*13;
 }
 
 pub struct GameState {
@@ -32,6 +177,7 @@ pub struct GameState {
     pub episode: usize,
     pub map_num: usize,
     pub tick: u64,
+    menu: Menu,
 }
 
 impl GameState {
@@ -47,6 +193,7 @@ impl GameState {
             episode: 0,
             map_num: 0,
             tick: 0,
+            menu: Menu::new(),
         }
     }
 

@@ -34,3 +34,7 @@ image = "0.23"
 [profile.release]
 opt-level = 3
 lto = true
+
+[features]
+spear = false
+goodtimes = false

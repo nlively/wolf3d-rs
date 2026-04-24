@@ -117,6 +117,10 @@ fn main() -> Result<()> {
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::new();
+
+    let path = std::path::Path::new("assets");
+    app.game.load_assets(path);
+
     event_loop.run_app(&mut app)?;
 
     Ok(())
