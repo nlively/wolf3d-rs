@@ -9,8 +9,7 @@ use crate::game::{
 };
 use crate::math::{tables::FINEANGLES, Fixed};
 
-/// Sprite codes in plane 1 that indicate actor spawns.
-/// These match GFXV_WL6.H values.
+/// Sprite codes in plane 1 that indicate actor/player spawns.
 mod spawn_codes {
     pub const PLAYER_N: u16 = 19;
     pub const PLAYER_E: u16 = 20;
@@ -26,15 +25,6 @@ mod spawn_codes {
     pub const DOG_E: u16 = 139;
     pub const DOG_S: u16 = 140;
     pub const DOG_W: u16 = 141;
-
-    pub const DOOR_H: u16 = 90;
-    pub const DOOR_V: u16 = 91;
-    pub const GOLD_DOOR_H: u16 = 92;
-    pub const GOLD_DOOR_V: u16 = 93;
-    pub const SILVER_DOOR_H: u16 = 94;
-    pub const SILVER_DOOR_V: u16 = 95;
-    pub const ELEVATOR_H: u16 = 100;
-    pub const ELEVATOR_V: u16 = 101;
 }
 
 pub struct GameMap {
@@ -46,7 +36,7 @@ impl GameMap {
         Self { level }
     }
 
-    /// Parse plane 1 spawn codes and populate actors, doors, and initial player pos.
+    /// Parse plane 1 spawn codes for actors/player, and door_spawns for doors.
     pub fn spawn_things(
         &self,
         actors: &mut ActorList,
@@ -55,6 +45,7 @@ impl GameMap {
         use spawn_codes::*;
         let mut player = Player::new();
 
+        // Actors and player from plane 1.
         for y in 0..self.level.height {
             for x in 0..self.level.width {
                 let code = self.level.sprite_at(x, y);
@@ -77,18 +68,20 @@ impl GameMap {
                         actors.spawn(ActorKind::Dog, fx, fy);
                     }
 
-                    DOOR_H => doors.doors.push(Door::new(x, y, DoorKind::Normal, true)),
-                    DOOR_V => doors.doors.push(Door::new(x, y, DoorKind::Normal, false)),
-                    GOLD_DOOR_H => doors.doors.push(Door::new(x, y, DoorKind::Gold, true)),
-                    GOLD_DOOR_V => doors.doors.push(Door::new(x, y, DoorKind::Gold, false)),
-                    SILVER_DOOR_H => doors.doors.push(Door::new(x, y, DoorKind::Silver, true)),
-                    SILVER_DOOR_V => doors.doors.push(Door::new(x, y, DoorKind::Silver, false)),
-                    ELEVATOR_H => doors.doors.push(Door::new(x, y, DoorKind::Elevator, true)),
-                    ELEVATOR_V => doors.doors.push(Door::new(x, y, DoorKind::Elevator, false)),
-
                     _ => {} // TODO: remaining static objects / enemy types
                 }
             }
+        }
+
+        // Doors from plane 0 (pre-parsed into door_spawns at load time).
+        for ds in &self.level.door_spawns {
+            let kind = match ds.lock {
+                1 => DoorKind::Gold,
+                2 => DoorKind::Silver,
+                5 => DoorKind::Elevator,
+                _ => DoorKind::Normal,
+            };
+            doors.doors.push(Door::new(ds.tile_x, ds.tile_y, kind, ds.is_vertical));
         }
 
         player
