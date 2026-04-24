@@ -26,6 +26,13 @@ struct HuffmanNode {
     val2: u16,
 }
 
+struct RGBA {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8
+}
+
 /// A decoded graphics chunk.  The exact format depends on the chunk type
 /// (pic, sprite, font, etc.) — see GFXV_WL6.H for the enum layout.
 pub struct GfxChunk {
@@ -35,12 +42,12 @@ pub struct GfxChunk {
     pub height: u16,
 }
 
-impl Deref for GfxChunk {
-    type Target = GfxChunk;
-    fn deref(&self) -> &GfxChunk {
-        &self
-    }
-}
+// impl Deref for GfxChunk {
+//     type Target = GfxChunk;
+//     fn deref(&self) -> &GfxChunk {
+//         &self
+//     }
+// }
 
 /// Sprite table entry — spritetabletype in the original.
 #[derive(Debug, Clone)]
@@ -65,6 +72,7 @@ struct CompShape {
 pub struct GraphicsCache {
     /// Raw decoded chunks, indexed by chunk number.
     chunks: Vec<Option<GfxChunk>>,
+    /// vector of RGB tuples
     palette: Vec<(u8, u8, u8)>,
     /// Sprite metadata table (loaded from VSWAP).
     pub sprites: Vec<SpriteInfo>,
@@ -75,11 +83,11 @@ pub struct GraphicsCache {
 impl GraphicsCache {
     pub fn load(base: &Path) -> Result<Self> {
         let base_str = base.to_str().unwrap();
-        let header_path = format!("{}/VGAHEAD.WL6", base_str);
-        let huffman_dict_path = format!("{}/VGADICT.WL6", base_str);
-        let assets_path = format!("{}/VGAGRAPH.WL6", base_str);
-        let swap_path = format!("{}/VSWAP.WL6", base_str);
-        let palette_path = "assets/VSWAP.WL6";
+        let header_path = format!("{}/data/VGAHEAD.WL6", base_str);
+        let huffman_dict_path = format!("{}/data/VGADICT.WL6", base_str);
+        let assets_path = format!("{}/data/VGAGRAPH.WL6", base_str);
+        let swap_path = format!("{}/data/VSWAP.WL6", base_str);
+        let palette_path = format!("{}/GAMEPAL.OBJ", base_str);
 
         let data_offsets: Vec<u32>;
         let huffman_tree: Vec<HuffmanNode>;
@@ -92,7 +100,7 @@ impl GraphicsCache {
         // Read VGADICT for the 256-entry Huffman decode tree.
         huffman_tree = read_vga_huffman_tree(&huffman_dict_path).expect("failed to load huffman tree");
         palette = load_game_palette(&palette_path);
-        page_info = read_page_file(&swap_path).expect("could not parse VSWAP.WL6");
+        page_info = read_page_file(&swap_path, &palette).expect("could not parse VSWAP.WL6");
         raw_graphics_data = fs::read(assets_path).expect("failed to read file {path}"); 
         
         let mut decompressed: Vec<Vec<u8>> = Vec::new();
@@ -111,6 +119,7 @@ impl GraphicsCache {
         // now we make meaning from each chunk of decompressed data
         let pictable = &decompressed[PICTABLE_IDX];
 
+
         for i in PICS_IDX..(PICS_IDX+NUMPICS) {
             // raw bytes of the graphics chunk
             let pic = &decompressed[i];
@@ -127,10 +136,11 @@ impl GraphicsCache {
                 width,
                 height,
             };
+
+
             
             chunks.push(Some(chunk));
         }
-
 
         log::warn!("GraphicsCache::load — stub, no data loaded from {:?}", base);
         Ok(Self { 
@@ -143,7 +153,7 @@ impl GraphicsCache {
 
     /// Return the raw bytes of chunk `index`, if loaded.
     pub fn chunk(&self, index: usize) -> Option<&GfxChunk> {
-        self.chunks.get(index)?.as_deref()
+        self.chunks.get(index)?.as_ref()
     }
 
     /// Return a 32-bit RGBA pixel slice for a picture chunk.
@@ -152,11 +162,11 @@ impl GraphicsCache {
         let chunk = self.chunk(index);
         match chunk {
             Some(v) => {
-                // TODO: convert chunky VGA palette data → RGBA8888
+                // TODO: convert chunky VnGA palette data → RGBA8888
                 let pixels: Vec<u8> = v.data.iter()
                     .flat_map(|&idx| {
                         let (r, g, b) = self.palette[idx as usize];
-                        [r, g, b]
+                        [r, g, b, 0xFF]
                     })
                     .collect();
                
@@ -170,7 +180,6 @@ impl GraphicsCache {
 
 
 
-
 fn load_game_palette(path: &str) -> Vec<(u8, u8, u8)> {
     let data = fs::read(path).expect("Failed to read palette data from file");
     let mut i = 0;
@@ -178,7 +187,9 @@ fn load_game_palette(path: &str) -> Vec<(u8, u8, u8)> {
         let rec_type = data[i];
         let rec_len = u16::from_le_bytes([data[i+1], data[i+2]]) as usize;
         // LEDATA record
+        // print!("rec_type = {}\n", rec_type);
         if rec_type == 0xA0 {
+            print!("found rec-type == 0xA0");
             // skip seg_index (1) + data_offset (2) = 3 bytes
             let payload  = &data[i+3+3 .. i+3+rec_len-1]; // -1 to exclude checksum
             if payload.len() == 768 {
@@ -190,6 +201,28 @@ fn load_game_palette(path: &str) -> Vec<(u8, u8, u8)> {
         i += 3 + rec_len;
     }
     panic!("palette not found in data file");
+}
+
+
+// take planar vga data and convert it into rgb
+fn deplanarize(planar: &[u8], palette: &[(u8, u8, u8)]) -> Vec<u8> {
+    let mut rgb = vec![0u8; 64 * 64 * 3]; // 3 bytes per pixel in a 64x64 square
+    for x in 0..64usize {
+        // there are 4 planes in the source data
+        let plane = x % 4;
+        let col_in_plane = x / 4;
+        for y in 0..64usize {
+            // compute planar data index based on plane, column and y position
+            let src = plane * 1024 + col_in_plane * 64 + y;
+            let palette_idx = planar[src] as usize;
+            let (r, g, b) = palette[palette_idx];
+            let dst = (y * 64 + x) * 3;
+            rgb[dst] = r;
+            rgb[dst + 1] = g;
+            rgb[dst + 2] = b;
+        }
+    }
+    rgb
 }
      
 /*
@@ -330,7 +363,7 @@ struct PageInfo {
 - sound pages start at 542 (0x21E)
 */
 
-fn read_page_file(path: &str) -> Option<PageInfo> {
+fn read_page_file(path: &str, palette: &[(u8, u8, u8)]) -> Option<PageInfo> {
     let bytes = fs::read(path).expect("failed to read page file");
     let mut cursor = Cursor::new(bytes);
 
@@ -377,10 +410,16 @@ fn read_page_file(path: &str) -> Option<PageInfo> {
         cursor.set_position(page.offset as u64);
         let mut bytes = vec![0u8; page.length];
         cursor.read_exact(&mut bytes).expect("failed to read wall page");
-        wall_pages.push(bytes);
+
+        let rgb_data = deplanarize(&bytes, palette);
+        wall_pages.push(rgb_data);
     }
 
     for page in sprite_page_info {
+        // skip page unless it matches 4 + 64*2 in length
+        if page.length < 132 {
+            continue;
+        }
         cursor.set_position(page.offset as u64);
         let mut bytes = vec![0u8; page.length];
         cursor.read_exact(&mut bytes).expect("failed to read sprite page");

@@ -273,7 +273,7 @@ impl Renderer {
                 };
 
                 let (r, g, b) = if let Some(t) = tex {
-                    let idx = (tex_y as usize * 64 + hit.tex_x as usize) * 4;
+                    let idx = (tex_y as usize * 64 + hit.tex_x as usize) * 3;
                     if idx + 2 < t.len() {
                         (t[idx], t[idx + 1], t[idx + 2])
                     } else {

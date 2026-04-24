@@ -66,7 +66,7 @@
   - Fill `depth_buf` for sprite clipping
   - Reference: `WL_DRAW.C::WallRefresh`, `HitVertWall` / `HitHorizWall`
 
-- [ ] **2b. Texture mapping**
+- [x] **2b. Texture mapping**
   - Decode wall textures from graphics chunks into 64×64 RGBA slabs
   - Apply to wall columns (correct horizontal texture coordinate)
   - Shade E/W faces darker than N/S faces

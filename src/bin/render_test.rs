@@ -1,3 +1,4 @@
+use wolf3d_rs::assets::graphics::GraphicsCache;
 /// Render a single frame to a PNG for visual inspection of the raycaster.
 ///
 /// Run with:
@@ -34,16 +35,19 @@ fn main() {
 
     // Player at the centre of the room, facing east (angle 0).
     let view = View {
-        x: Fixed::from_f32(8.5),
-        y: Fixed::from_f32(8.5),
+        x: Fixed::from_f32(12.5),
+        y: Fixed::from_f32(12.5),
         angle: 450,
     };
 
     let mut renderer = Renderer::new();
 
+    let path = std::path::Path::new("assets");
+    let graphics_cache = GraphicsCache::load(path).unwrap();
+
     // Framebuffer: VIEW_WIDTH × VIEW_HEIGHT RGBA8888, stride = VIEW_WIDTH.
     let mut fb = vec![0u8; VIEW_WIDTH * VIEW_HEIGHT * 4];
-    let textures: Vec<Vec<u8>> = Vec::new(); // no textures yet — walls render as red
+    let textures: Vec<Vec<u8>> = graphics_cache.wall_textures;
 
     renderer.draw_frame(&mut fb, VIEW_WIDTH, &view, &level, &textures);
 
