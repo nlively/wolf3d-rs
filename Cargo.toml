@@ -3,7 +3,7 @@ name = "wolf3d-rs"
 version = "0.1.0"
 edition = "2021"
 description = "Wolfenstein 3D ported to Rust"
-authors = []
+authors = ["Noah Lively"]
 
 [[bin]]
 name = "wolf3d"

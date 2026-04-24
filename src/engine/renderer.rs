@@ -44,6 +44,7 @@ struct ColumnHit {
 }
 
 pub struct Renderer {
+    // prebuilt trigonometry tables for all the angles we raycast to
     trig: TrigTables,
     /// Pixel column hit data from the last raycaster pass.
     columns: Vec<ColumnHit>,
@@ -53,6 +54,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
+        // prebuild trigonometry tables as a rendering optimization
         let trig = TrigTables::build();
         let columns = (0..VIEW_WIDTH).map(|_| ColumnHit::default()).collect();
         let depth_buf = vec![Fixed::ZERO; VIEW_WIDTH];
@@ -271,7 +273,7 @@ impl Renderer {
                 };
 
                 let (r, g, b) = if let Some(t) = tex {
-                    let idx = (tex_y as usize * 64 + hit.tex_x as usize) * 4;
+                    let idx = (tex_y as usize * 64 + hit.tex_x as usize) * 3;
                     if idx + 2 < t.len() {
                         (t[idx], t[idx + 1], t[idx + 2])
                     } else {
