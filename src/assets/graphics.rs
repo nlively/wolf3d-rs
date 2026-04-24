@@ -1,15 +1,14 @@
-use std::io::Read;
 /// Graphics chunk loader — corresponds to ID_CA.C graphics routines.
 ///
 /// The VGAGRAPH archive is indexed by VGAHEAD (chunk offsets) and
 /// VGADICT (Huffman dictionary).  Each chunk is Huffman-compressed.
 ///
 /// Relevant original constants live in GFXV_WL6.H (chunk enum).
+use std::io::Read;
 use std::path::Path;
 
-use anyhow::{Result};
+use anyhow::Result;
 
-use std::ops::Deref;
 use std::fs;
 use std::io::Cursor;
 use std::io::ErrorKind;
@@ -142,11 +141,10 @@ impl GraphicsCache {
             chunks.push(Some(chunk));
         }
 
-        log::warn!("GraphicsCache::load — stub, no data loaded from {:?}", base);
-        Ok(Self { 
-            chunks, 
-            palette, 
-            wall_textures: page_info.wall_pages, 
+        Ok(Self {
+            chunks,
+            palette,
+            wall_textures: page_info.wall_pages,
             sprites: Vec::new(),
         })
     }

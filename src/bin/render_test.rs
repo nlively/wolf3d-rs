@@ -1,10 +1,10 @@
-use wolf3d_rs::assets::graphics::GraphicsCache;
 /// Render a single frame to a PNG for visual inspection of the raycaster.
 ///
 /// Run with:
 ///   cargo run --bin render_test
 ///
 /// Output: output/render_test.png
+use wolf3d_rs::assets::graphics::GraphicsCache;
 use wolf3d_rs::assets::maps::{Level, MAP_SIZE, NUM_PLANES};
 use wolf3d_rs::engine::renderer::{Renderer, View, VIEW_HEIGHT, VIEW_WIDTH};
 use wolf3d_rs::math::Fixed;
@@ -12,8 +12,7 @@ use wolf3d_rs::math::Fixed;
 fn make_test_level() -> Level {
     let mut planes = [[0u16; MAP_SIZE * MAP_SIZE]; NUM_PLANES];
 
-    // Fill plane 0 (walls) with a simple 16x16 room in the top-left corner of
-    // the 64x64 grid.  Border tiles = 1 (solid wall), interior = 0 (floor).
+    // 16x16 room in the top-left corner; border = tile 1 (solid wall).
     let room = 16usize;
     for y in 0..room {
         for x in 0..room {
@@ -27,17 +26,17 @@ fn make_test_level() -> Level {
         planes,
         width: MAP_SIZE,
         height: MAP_SIZE,
+        door_spawns: Vec::new(),
     }
 }
 
 fn main() {
     let level = make_test_level();
 
-    // Player at the centre of the room, facing east (angle 0).
     let view = View {
-        x: Fixed::from_f32(12.5),
-        y: Fixed::from_f32(12.5),
-        angle: 450,
+        x: Fixed::from_f32(8.5),
+        y: Fixed::from_f32(8.5),
+        angle: 120,
     };
 
     let mut renderer = Renderer::new();
@@ -45,13 +44,11 @@ fn main() {
     let path = std::path::Path::new("assets");
     let graphics_cache = GraphicsCache::load(path).unwrap();
 
-    // Framebuffer: VIEW_WIDTH × VIEW_HEIGHT RGBA8888, stride = VIEW_WIDTH.
     let mut fb = vec![0u8; VIEW_WIDTH * VIEW_HEIGHT * 4];
     let textures: Vec<Vec<u8>> = graphics_cache.wall_textures;
 
-    renderer.draw_frame(&mut fb, VIEW_WIDTH, &view, &level, &textures);
+    renderer.draw_frame(&mut fb, VIEW_WIDTH, &view, &level, &textures, &[]);
 
-    // Save to output/render_test.png
     std::fs::create_dir_all("output").expect("failed to create output/");
     image::save_buffer(
         "output/render_test.png",

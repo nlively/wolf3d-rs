@@ -61,9 +61,6 @@ struct Map
 const NEAR_TAG: u8 = 0xA7;
 const FAR_TAG: u8 = 0xA8;
 
-// fn read_16_le(data: &[u8], pos: &mut: usize) -> u16 {
-
-// }
 
 fn carmack_decompress(compressed: &[u8], length: u16) -> Vec<u16> {
     // length was passed in bytes but we're iterating over 2-byte words

@@ -17,13 +17,15 @@ use crate::math::{
     Fixed,
 };
 
-pub const VIEW_WIDTH: usize = 256; // size of view window
-pub const VIEW_HEIGHT: usize = 152; // status bar takes the bottom ~48 rows
+pub const VIEW_WIDTH: usize = 256;
+pub const VIEW_HEIGHT: usize = 152;
 pub const HALF_HEIGHT: usize = VIEW_HEIGHT / 2;
+
+/// VSWAP wall texture index for the standard door face (PMSpriteStart - 8 = 106 - 8).
+const DOOR_TEXTURE: u16 = 98;
 
 /// Player view parameters passed to each frame.
 pub struct View {
-    /// Player position in tile-space (fixed-point).
     pub x: Fixed,
     pub y: Fixed,
     /// Player angle in fine-angle units (0..FINEANGLES).
@@ -33,9 +35,8 @@ pub struct View {
 /// One entry per screen column produced by the raycaster.
 #[derive(Default, Debug)]
 struct ColumnHit {
-    /// Perpendicular distance to the wall.
+    /// Perpendicular (fisheye-corrected) distance to the wall.
     dist: Fixed,
-    /// Which wall texture to use.
     texture: u16,
     /// Horizontal texture coordinate (0..63).
     tex_x: u8,
@@ -44,9 +45,7 @@ struct ColumnHit {
 }
 
 pub struct Renderer {
-    // prebuilt trigonometry tables for all the angles we raycast to
     trig: TrigTables,
-    /// Pixel column hit data from the last raycaster pass.
     columns: Vec<ColumnHit>,
     /// Depth buffer (perpendicular distances) used for sprite clipping.
     pub depth_buf: Vec<Fixed>,
@@ -54,7 +53,6 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
-        // prebuild trigonometry tables as a rendering optimization
         let trig = TrigTables::build();
         let columns = (0..VIEW_WIDTH).map(|_| ColumnHit::default()).collect();
         let depth_buf = vec![Fixed::ZERO; VIEW_WIDTH];
@@ -64,28 +62,28 @@ impl Renderer {
     /// Draw a full frame into `fb`.
     ///
     /// `fb` is a flat RGBA8888 buffer of `stride * height` pixels.
-    /// Only the VIEW_WIDTH × VIEW_HEIGHT region is written.
+    /// `textures`: 64×64 RGB (3 bytes/pixel) slabs indexed by wall tile number.
+    /// `door_positions`: openness of each door by door index (0=closed, 63=open).
     pub fn draw_frame(
         &mut self,
         fb: &mut [u8],
         stride: usize,
         view: &View,
         level: &Level,
-        textures: &[Vec<u8>], // 64×64 RGBA textures indexed by tile number
+        textures: &[Vec<u8>],
+        door_positions: &[u8],
     ) {
         self.draw_ceiling_floor(fb, stride);
-        self.cast_walls(view, level);
+        self.cast_walls(view, level, door_positions);
         self.draw_walls(fb, stride, textures);
     }
 
-    /// Fill ceiling (upper half) and floor (lower half) with flat colour.
-    /// TODO: textured floors & ceilings from the Spear of Destiny data.
     fn draw_ceiling_floor(&self, fb: &mut [u8], stride: usize) {
         for y in 0..VIEW_HEIGHT {
             let color = if y < HALF_HEIGHT {
-                [0x39, 0x39, 0x39, 0xFF] // ceiling grey
+                [0x39, 0x39, 0x39, 0xFF]
             } else {
-                [0x70, 0x70, 0x70, 0xFF] // floor grey
+                [0x70, 0x70, 0x70, 0xFF]
             };
             for x in 0..VIEW_WIDTH {
                 let offset = (y * stride + x) * 4;
@@ -96,159 +94,143 @@ impl Renderer {
         }
     }
 
-    /// DDA raycaster — fills self.columns.
-    fn cast_walls(&mut self, view: &View, level: &Level) {
-        // FOV is 60° = FINEANGLES/6 fine-angle units.
-        let fov_half = FINEANGLES / 12;
-        // combine the field of view with the player's current angle
-        let start_angle =
-            (view.angle + FINEANGLES - fov_half) % FINEANGLES;
+    /// DDA raycaster.
+    ///
+    /// raw_dist (side_dist accumulator) is the Euclidean ray length.
+    /// Perpendicular depth = raw_dist * cos(ray_angle - player_angle),
+    /// which is what we store in ColumnHit::dist to avoid fisheye distortion.
+    fn cast_walls(&mut self, view: &View, level: &Level, door_positions: &[u8]) {
+        let fov_half = FINEANGLES / 12; // 60° FOV → ±30°
+        let start_angle = (view.angle + FINEANGLES - fov_half) % FINEANGLES;
 
-        // loop through every horizontal pixel from 0 to the end of the view window
         for col in 0..VIEW_WIDTH {
-            // calc the angle of this specific ray
             let ray_angle =
                 (start_angle + col * (FINEANGLES / 6) / VIEW_WIDTH) % FINEANGLES;
 
-            // DDA step
-            // noah's note: DDA = digital differential analyzer, which
-            // is a way to translate continuous theoretical values into 
-            // a discrete grid
+            // Angle between this ray and forward — used for fisheye correction.
+            let angle_diff = (ray_angle + FINEANGLES - view.angle) % FINEANGLES;
+
             let cos = self.trig.cos(ray_angle);
             let sin = self.trig.sin(ray_angle);
 
-            // Starting tile
             let mut map_x = view.x.to_int();
             let mut map_y = view.y.to_int();
 
-            // decompose the ray into per-axis delta distances
-            // i.e., how far do we travel along the conceptual ray to cross
-            // one full tile boundary in each axis.
-            // we compute these once and they stay constant for the whole march
             let delta_dist_x = if cos == Fixed::ZERO {
-                Fixed::from_int(64) // guard against divide by zero
-            } else { 
-                Fixed::abs(Fixed::from_int(1) / cos) 
+                Fixed::from_int(64)
+            } else {
+                Fixed::abs(Fixed::from_int(1) / cos)
             };
             let delta_dist_y = if sin == Fixed::ZERO {
-                Fixed::from_int(64) // guard against divide by zero
-            } else { 
+                Fixed::from_int(64)
+            } else {
                 Fixed::abs(Fixed::from_int(1) / sin)
             };
 
-            // determine the direction we step in, both horizontally and vertically
-            let step_x = if cos < Fixed::ZERO { -1 } else { 1 };
-            let step_y = if sin < Fixed::ZERO { -1 } else { 1 };
+            let step_x: i32 = if cos < Fixed::ZERO { -1 } else { 1 };
+            let step_y: i32 = if sin < Fixed::ZERO { -1 } else { 1 };
 
             let x_frac = Fixed(view.x.frac());
             let y_frac = Fixed(view.y.frac());
-            let initial_side_dist_x = if step_x < 0 {
+            let mut side_dist_x = if step_x < 0 {
                 x_frac * delta_dist_x
             } else {
                 (Fixed::ONE - x_frac) * delta_dist_x
             };
-            let initial_side_dist_y = if step_y < 0 {
+            let mut side_dist_y = if step_y < 0 {
                 y_frac * delta_dist_y
             } else {
-                (Fixed::ONE- y_frac) * delta_dist_y
+                (Fixed::ONE - y_frac) * delta_dist_y
             };
 
-            // initialize our running `side_dist` values with the initial 
-            // boundary crossing values
-            // from here forward, side_dist_x and y represent distance
-            // along the ray to the next X- or Y-grid crossing
-            let mut side_dist_x = initial_side_dist_x;
-            let mut side_dist_y = initial_side_dist_y;
+            const MAX_ITER: u8 = 100;
+            let mut i: u8 = 0;
 
-            const MAX_ITERATIONS: u8 = 100;
-            let mut i:u8 = 0;
             loop {
-                let ew_face;
-                // perpendicular_distance is the key to avoiding the fisheye distortion that
-                // would otherwise make our walls look curved.
-                // perpendicular_distance is the distance from the player to the wall
-                // measured perpendicular to the camera plane (i.e. straight ahead along
-                // the view direction), not along the ray itself.
-                // another way to say that is that perpendicular_distance is the distance
-                // between the player and the wall dead-on, not at an offset angle.
-                // this is because we hit a point on the wall, and multiple rays
-                // may hit multiple points on the same wall, each at a different distance
-                // because each ray comes from a different angle.
-                let perpendicular_distance;
+                let ew_face: bool;
+                let raw_dist: Fixed;
                 if side_dist_x < side_dist_y {
                     ew_face = true;
-
-                    // dead-on distance between player and wall is the distance
-                    // it has traveled so far (before incrementing) to reach the next
-                    // X-grid boundary
-                    perpendicular_distance = side_dist_x;
+                    raw_dist = side_dist_x;
                     map_x += step_x;
                     side_dist_x = side_dist_x + delta_dist_x;
-                } else { 
+                } else {
                     ew_face = false;
-                    // dead-on distance between player and wall is the distance
-                    // it has traveled so far (before incrementing) to reach the next
-                    // Y-grid boundary
-                    perpendicular_distance = side_dist_y;
+                    raw_dist = side_dist_y;
                     map_y += step_y;
                     side_dist_y = side_dist_y + delta_dist_y;
                 }
 
-                // this is a safeguard against corruption so that our cast to 
-                // usize doesn't end up getting interpreted as a huge number
                 if map_x < 0 || map_y < 0 {
                     break;
                 }
 
                 let wall = level.wall_at(map_x as usize, map_y as usize);
-                // wall is a positive number if we hit a wall, which we always should.
-                if wall > 0 {
-                    // the ray doesn't just hit a tile; it hits a _point_
-                    // on the tile.
-                    // determine what point on the tile the ray collided with?
-                    let wall_hit_point = if ew_face {
-                        view.y + perpendicular_distance * sin
-                    } else {
-                        view.x + perpendicular_distance * cos
-                    };
 
-                    // save a ColumnHit instance for this particular pixel
+                if wall & 0x80 != 0 {
+                    // Door tile. Face sits at the tile centre (half a delta further).
+                    let door_idx = (wall & 0x7F) as usize;
+                    let openness = door_positions.get(door_idx).copied().unwrap_or(0);
+                    let open_frac = Fixed(openness as i32 * 1024); // 0..Fixed::ONE
+
+                    if ew_face {
+                        let mid_dist = raw_dist + delta_dist_x / Fixed::from_int(2);
+                        let y_at_door = view.y + mid_dist * sin;
+                        let yf = Fixed(y_at_door.frac());
+                        if yf.0 >= open_frac.0 {
+                            let perp = mid_dist * self.trig.cos(angle_diff);
+                            let tex_x = ((yf.0 - open_frac.0) >> 10).clamp(0, 63) as u8;
+                            self.columns[col] = ColumnHit { dist: perp, texture: DOOR_TEXTURE, tex_x, ew_face };
+                            self.depth_buf[col] = perp;
+                            break;
+                        }
+                        // open enough — ray passes through, continue march
+                    } else {
+                        let mid_dist = raw_dist + delta_dist_y / Fixed::from_int(2);
+                        let x_at_door = view.x + mid_dist * cos;
+                        let xf = Fixed(x_at_door.frac());
+                        if xf.0 >= open_frac.0 {
+                            let perp = mid_dist * self.trig.cos(angle_diff);
+                            let tex_x = ((xf.0 - open_frac.0) >> 10).clamp(0, 63) as u8;
+                            self.columns[col] = ColumnHit { dist: perp, texture: DOOR_TEXTURE, tex_x, ew_face };
+                            self.depth_buf[col] = perp;
+                            break;
+                        }
+                    }
+                } else if wall > 0 {
+                    // Solid wall. Strip 0x40 jamb flag to get the texture index.
+                    let perp = raw_dist * self.trig.cos(angle_diff);
+                    let wall_texture = wall & !0x40u16;
+                    let wall_hit = if ew_face {
+                        view.y + raw_dist * sin
+                    } else {
+                        view.x + raw_dist * cos
+                    };
                     self.columns[col] = ColumnHit {
-                        dist: perpendicular_distance,
-                        texture: wall,
-                        tex_x: (wall_hit_point.frac() >> 10) as u8,
+                        dist: perp,
+                        texture: wall_texture,
+                        tex_x: (wall_hit.frac() >> 10) as u8,
                         ew_face,
                     };
-
-                    self.depth_buf[col] = perpendicular_distance;
-
-
+                    self.depth_buf[col] = perp;
                     break;
                 }
 
-                // this is just a safeguard in case we have some kind of corruption
-                // in the map data and _never_ hit a wall, which shouldn't happen
-                if i >= MAX_ITERATIONS {
+                if i >= MAX_ITER {
                     self.columns[col] = ColumnHit {
-                        dist: Fixed::from_int(64), // far away
+                        dist: Fixed::from_int(64),
                         texture: 0,
                         tex_x: 0,
                         ew_face: false,
                     };
                     self.depth_buf[col] = Fixed::from_int(64);
-
                     break;
                 }
-
                 i += 1;
             }
         }
-
-        // print columns
-        println!("{:#?}", self.columns);
     }
 
-    /// Project wall columns onto the framebuffer using self.columns.
     fn draw_walls(&self, fb: &mut [u8], stride: usize, textures: &[Vec<u8>]) {
         for col in 0..VIEW_WIDTH {
             let hit = &self.columns[col];
@@ -256,8 +238,7 @@ impl Renderer {
                 continue;
             }
 
-            // Wall height = VIEW_HEIGHT * /dist
-            let h_fixed = Fixed::from_int(VIEW_HEIGHT as i32) / hit.dist;
+            let h_fixed = Fixed::from_int(VIEW_HEIGHT as i32) * Fixed::ONE / hit.dist;
             let wall_h = h_fixed.to_int().clamp(0, VIEW_HEIGHT as i32) as usize;
             let top = (VIEW_HEIGHT / 2).saturating_sub(wall_h / 2);
             let bottom = top + wall_h;
@@ -265,7 +246,6 @@ impl Renderer {
             let tex = textures.get(hit.texture as usize);
 
             for y in top..bottom.min(VIEW_HEIGHT) {
-                // Map y into texture coordinate (0..63)
                 let tex_y = if wall_h > 0 {
                     ((y - top) * 64 / wall_h) as u8
                 } else {
@@ -275,18 +255,20 @@ impl Renderer {
                 let (r, g, b) = if let Some(t) = tex {
                     let idx = (tex_y as usize * 64 + hit.tex_x as usize) * 3;
                     if idx + 2 < t.len() {
-                        (t[idx], t[idx + 1], t[idx + 2])
+                        let (r, g, b) = (t[idx], t[idx + 1], t[idx + 2]);
+                        // E/W faces are shaded at half brightness (matches original).
+                        // shifting bits right is a fast divide-by-two trick
+                        if hit.ew_face { (r >> 1, g >> 1, b >> 1) } else { (r, g, b) }
                     } else {
-                        (0xFF, 0x00, 0xFF) // magenta = missing texture
+                        (0xFF, 0x00, 0xFF) // magenta = missing/out-of-range texture
                     }
                 } else {
-                    // Shade based on E/W vs N/S face (like original)
-                    if hit.ew_face { (0xAA, 0x00, 0x00) } else { (0xFF, 0x00, 0x00) }
+                    if hit.ew_face { (0x55, 0x00, 0x00) } else { (0xFF, 0x00, 0x00) }
                 };
 
                 let offset = (y * stride + col) * 4;
                 if offset + 3 < fb.len() {
-                    fb[offset] = r;
+                    fb[offset]     = r;
                     fb[offset + 1] = g;
                     fb[offset + 2] = b;
                     fb[offset + 3] = 0xFF;
