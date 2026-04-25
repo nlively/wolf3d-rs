@@ -36,5 +36,8 @@ opt-level = 3
 lto = true
 
 [features]
-spear = false
-goodtimes = false
+default = ["wolf3d"]
+
+wolf3d = []
+spear = []
+goodtimes = []
