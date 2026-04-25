@@ -12,5 +12,6 @@ pub mod loader;
 pub mod maps;
 pub mod sounds;
 pub mod text;
+pub mod colors;
 
 pub use loader::AssetLoader;

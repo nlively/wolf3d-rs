@@ -590,7 +590,7 @@ impl GameState {
         // TODO: draw sprites, HUD
     }
 
-    fn draw_menu(&self, fb: &mut [u8], _width: usize, _height: usize) {
+    fn draw_menu(&mut self, fb: &mut [u8], _width: usize, _height: usize) {
         for chunk in fb.chunks_exact_mut(4) {
             chunk.copy_from_slice(&[0x1C, 0x1C, 0x1C, 0xFF]);
         }
@@ -601,7 +601,16 @@ impl GameState {
 
 				for item in screen.items.iter() {
 					println!("menu item {}", item.title);
+
+                    let _ = self.graphics.as_mut().unwrap().text_draw_context.draw_string(
+                        item.title.as_str(), 
+                        fb, 
+                        item.item_info.x as u16, 
+                        item.item_info.y as u16, 
+                        1);
 				}
+
+
 				// render main menu
 				println!("render main menu")
 			},

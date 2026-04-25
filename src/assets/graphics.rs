@@ -14,6 +14,8 @@ use std::io::Cursor;
 use std::io::ErrorKind;
 use byteorder::{LE, ReadBytesExt};
 
+use crate::assets::text::TextDrawContext;
+
 type ChunkOffset = u32;
 
 const PICTABLE_IDX: usize = 0;
@@ -77,6 +79,7 @@ pub struct GraphicsCache {
     pub sprites: Vec<SpriteInfo>,
     /// Wall texture metadata table (loaded from VSWAP)
     pub wall_textures: Vec<Vec<u8>>,
+    pub text_draw_context: TextDrawContext,
 }
 
 impl GraphicsCache {
@@ -87,6 +90,8 @@ impl GraphicsCache {
         let assets_path = format!("{}/data/VGAGRAPH.WL6", base_str);
         let swap_path = format!("{}/data/VSWAP.WL6", base_str);
         let palette_path = format!("{}/GAMEPAL.OBJ", base_str);
+
+        let text_draw_context = TextDrawContext::new(base)?;
 
         let data_offsets: Vec<u32>;
         let huffman_tree: Vec<HuffmanNode>;
@@ -146,6 +151,7 @@ impl GraphicsCache {
             palette,
             wall_textures: page_info.wall_pages,
             sprites: Vec::new(),
+            text_draw_context,
         })
     }
 
