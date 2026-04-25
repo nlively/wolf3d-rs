@@ -616,6 +616,14 @@ impl GameState {
 	fn draw_menu_gun(&self, fb: &mut [u8]) {
 		
 	}
+
+    fn draw_text_string(&self, fb: &mut [u8], text: &str) {
+        for c in text.chars().into_iter() {
+            // measure char
+
+            // draw char to framebuffer
+        }
+    }
 }
 
 impl Default for GameState {
