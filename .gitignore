@@ -4,6 +4,7 @@ Cargo.lock
 
 # Game data files (not redistributable)
 assets/data/
+assets/extracted/
 *.WL6
 *.SOD
 *.VGA
@@ -26,3 +27,4 @@ Thumbs.db
 *.swp
 *.swo
 
+.claude/settings.local.json
