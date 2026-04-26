@@ -27,4 +27,5 @@ Thumbs.db
 *.swp
 *.swo
 
-.claude/settings.local.json
+# Claude Code local agent state
+.claude/
