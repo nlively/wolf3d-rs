@@ -598,21 +598,18 @@ impl GameState {
 		match self.menu.current {
 			MenuScreenOption::MainMenu => {
 				let screen = &self.menu.main_menu;
+                let graphics = self.graphics.as_mut().unwrap();
 
 				for item in screen.items.iter() {
-					println!("menu item {}", item.title);
-
-                    let _ = self.graphics.as_mut().unwrap().text_draw_context.draw_string(
+                    let _ = graphics.text_draw_context.draw_string(
                         item.title.as_str(), 
                         fb, 
-                        item.item_info.x as u16, 
-                        item.item_info.y as u16, 
+                        item.item_info.x as u32, 
+                        item.item_info.y as u32, 
                         1);
 				}
 
-
 				// render main menu
-				println!("render main menu")
 			},
 			_ => {
 				// todo: fill this in later

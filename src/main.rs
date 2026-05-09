@@ -119,6 +119,7 @@ fn main() -> Result<()> {
     let mut app = App::new();
 
     let path = std::path::Path::new("assets");
+    println!("loading assets");
     app.game.load_assets(path);
 
     event_loop.run_app(&mut app)?;

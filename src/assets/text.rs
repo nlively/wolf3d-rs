@@ -9,15 +9,15 @@ use crate::{SCREEN_WIDTH, assets};
 
 #[derive(Deserialize)]
 struct FontGlyph {
-    x: u16,
-    width: u16,
+    x: u32,
+    width: u32,
 }
 
 #[derive(Deserialize)]
 struct FontMetadata {
-    height: u16,
-    altas_width: u16,
-    glyphs: HashMap<u16, FontGlyph>,
+    height: u32,
+    atlas_width: u32,
+    glyphs: HashMap<u32, FontGlyph>,
 }
 
 struct FontStruct {
@@ -44,7 +44,7 @@ impl FontStruct {
         })
     }
 
-    fn character(&self, ascii: u16) -> (u16, u16) {
+    fn character(&self, ascii: u32) -> (u32, u32) {
         (self.metadata.glyphs[&ascii].x, self.metadata.glyphs[&ascii].width)
     }
 }
@@ -58,9 +58,12 @@ pub struct TextDrawContext {
 
 impl TextDrawContext {
     pub fn new(base_path: &Path) -> Result<Self, Error> {
+        let path_str =  base_path.to_str().unwrap();
+        let font_path_str = format!("{}/extracted/fonts", path_str);
+        let font_path = Path::new(font_path_str.as_str());
         // load font 1 and font 2
-        let font1 = FontStruct::new_from_file(base_path, "font_1")?;
-        let font2 = FontStruct::new_from_file(base_path, "font_2")?;
+        let font1 = FontStruct::new_from_file(font_path, "font_1")?;
+        let font2 = FontStruct::new_from_file(font_path, "font_2")?;
 
         Ok(Self {
             font_color: assets::colors::TEXTCOLOR,
@@ -70,7 +73,7 @@ impl TextDrawContext {
         })  
     }
 
-    fn font_from_number(&self, font_number: u16) -> Result<&FontStruct, Error> {
+    fn font_from_number(&self, font_number: u32) -> Result<&FontStruct, Error> {
         match font_number {
             1 => Ok(&self.fonts[0]),
             2 => Ok(&self.fonts[1]),
@@ -79,9 +82,9 @@ impl TextDrawContext {
     }
 
     /// renders a string of characters in a single row
-    pub fn draw_string(&mut self, s: &str, fb: &mut [u8], dest_x: u16, dest_y: u16, font_number: u16) -> Result<(u16, u16), Error> {
-        let fb_width = SCREEN_WIDTH as u16;
-        let character_spacing: u16 = 3;
+    pub fn draw_string(&mut self, s: &str, fb: &mut [u8], dest_x: u32, dest_y: u32, font_number: u32) -> Result<(u32, u32), Error> {
+        let fb_width = SCREEN_WIDTH as u32;
+        let character_spacing: u32 = 0;
 
         let mut fb_offset_x = dest_x;
 
@@ -94,22 +97,22 @@ impl TextDrawContext {
             if b == 0 {
                 break;
             }
-            let (offset, width) = font.character(b as u16);
+            let (offset, width) = font.character(b as u32);
             
-            for row in 0..font.metadata.height {
+            for row in 0..font.metadata.height as u32 {
                 let sy = row; // source y has no offset because the font image is just 1 row of glyphs
                 let dy = dest_y + row;
 
-                let src_start = ((sy * font.metadata.altas_width + offset) * 4) as usize;
+                let src_start = ((sy * font.metadata.atlas_width + offset) * 4) as usize;
                 let src_end = src_start + (width * 4) as usize;
 
-                let dst_start = ((dy * fb_width + fb_offset_x) * 4) as usize;
-                let dst_end = dst_start + (width * 4) as usize;
+                let dst_start = (dy * fb_width + fb_offset_x) * 4;
+                let dst_end = dst_start + (width as u32 * 4);
 
-                fb[dst_start..dst_end].copy_from_slice(&src_bytes[src_start..src_end]);
+                fb[(dst_start as usize)..(dst_end as usize)].copy_from_slice(&src_bytes[src_start..src_end]);
             }
 
-            fb_offset_x += width + character_spacing;
+            fb_offset_x += (width + character_spacing) as u32;
         }
 
         Ok((fb_offset_x, font.metadata.height))

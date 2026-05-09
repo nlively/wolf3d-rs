@@ -85,6 +85,7 @@ pub struct GraphicsCache {
 impl GraphicsCache {
     pub fn load(base: &Path) -> Result<Self> {
         let base_str = base.to_str().unwrap();
+        println!("GraphicsCache::load() with {}", base_str);
         let header_path = format!("{}/data/VGAHEAD.WL6", base_str);
         let huffman_dict_path = format!("{}/data/VGADICT.WL6", base_str);
         let assets_path = format!("{}/data/VGAGRAPH.WL6", base_str);
